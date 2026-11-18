@@ -1,14 +1,17 @@
 //! The 3D views: the spectrum history as ridges or a shaded surface, and the stereogram,
 //! a surface of level over stereo position and frequency.
 
-use aud_ui::theme::{ALERT, BACKGROUND, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{BACKGROUND, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
-use egui::{Align2, Color32, CursorIcon, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Ui, vec2};
+use egui::{
+    Align2, Color32, CursorIcon, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Ui, pos2, vec2,
+};
 
 use crate::analysis::Published;
-use crate::analysis::spectrum::{PAN_COLUMNS, SURFACE_RATE_HZ};
+use crate::analysis::spectrum::{PAN_COLUMNS, SURFACE_RATE_HZ, SurfaceFrame};
 use crate::settings::{SurfaceMode, SurfaceSettings};
-use crate::view::colormap::{Colors, Palette};
+use crate::style::SurfaceStyle;
+use crate::view::colormap::{Colors, Palette, rgb};
 use crate::view::plot::{Header, format_hz, grid_strong, plot_background};
 
 /// Height of a full-scale level in scene units; the floor spans −1..1 in x and z.
@@ -17,6 +20,8 @@ const HEIGHT: f32 = 0.7;
 const DISTANCE: f32 = 3.6;
 /// Direction towards the light, normalized below.
 const LIGHT: [f32; 3] = [-0.35, 0.85, -0.4];
+/// Gap between two stacked lanes in logical pixels.
+const LANE_GAP: f32 = 6.0;
 /// Camera rotation per dragged pixel in degrees.
 const DRAG_DEG_PER_PX: f32 = 0.35;
 
@@ -73,7 +78,7 @@ pub fn draw(
     view: &mut SurfaceView,
     data: &Published,
     settings: &mut SurfaceSettings,
-    colors: &Colors,
+    (colors, style, lane_names): (&Colors, &SurfaceStyle, [&str; 2]),
 ) {
     let title = match settings.mode {
         SurfaceMode::Stereogram => "3D STEREOGRAM",
@@ -113,8 +118,8 @@ pub fn draw(
         }
     }
 
-    if view.palette.heat() != colors.heat {
-        view.palette = Palette::new(colors.heat);
+    if view.palette.heat() != style.heat {
+        view.palette = Palette::new(style.heat);
     }
     let surface = &data.surface;
     if surface.rows.is_empty() || surface.bands < 2 {
@@ -127,69 +132,38 @@ pub fn draw(
         );
         return;
     }
-    let camera = Camera::new(settings, plot);
     let floor_db = -settings.range.db();
     let level = |db: f32| ((db - floor_db) / -floor_db).clamp(0.0, 1.0);
-    let clipped = painter.with_clip_rect(plot.shrink(1.0));
-    draw_floor(&clipped, &camera);
 
     match settings.mode {
         SurfaceMode::Ridges | SurfaceMode::Surface => {
-            let bands = surface.bands;
-            let depth = settings.depth.count();
-            let rows = surface.rows.len().min(depth);
-            let skip = surface.rows.len() - rows;
-            let z_of = |row: usize| -1.0 + 2.0 * (rows - 1 - row) as f32 / (depth - 1) as f32;
-            let x_of = |band: usize| -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
-            draw_spectrum_axes(&clipped, &camera, surface.range_hz, depth);
-            if settings.mode == SurfaceMode::Surface {
-                view.points.clear();
-                view.colors.clear();
-                for (row, levels) in surface.rows.iter().skip(skip).enumerate() {
-                    let age = (rows - 1 - row) as f32 / (depth - 1) as f32;
-                    for (band, db) in levels.iter().enumerate() {
-                        let value = level(*db);
-                        view.points.push([x_of(band), value * HEIGHT, z_of(row)]);
-                        let color = view.palette.color(value);
-                        view.colors.push(fade(color, 1.0 - 0.35 * age));
+            // One scene per lane, stacked, each with the same camera.
+            let lanes = surface.lanes.clamp(1, 2);
+            let height = (plot.height() - LANE_GAP * (lanes - 1) as f32) / lanes as f32;
+            for (lane, name) in lane_names.iter().take(lanes).enumerate() {
+                let top = plot.top() + lane as f32 * (height + LANE_GAP);
+                let lane_rect =
+                    Rect::from_min_max(pos2(plot.left(), top), pos2(plot.right(), top + height));
+                let camera = Camera::new(settings, lane_rect);
+                let clipped = painter.with_clip_rect(lane_rect.shrink(1.0));
+                draw_floor(&clipped, &camera);
+                draw_spectrum_lane(&clipped, &camera, view, (surface, lane), settings, &level);
+                if lanes > 1 {
+                    lane_label(&painter, lane_rect, name);
+                    if lane > 0 {
+                        painter.hline(
+                            plot.x_range(),
+                            top - LANE_GAP * 0.5,
+                            stroke(1.0, alpha(TEXT_DIM, 0.4)),
+                        );
                     }
-                }
-                let mesh = shaded_mesh(&camera, view, bands, rows);
-                clipped.add(Shape::mesh(mesh));
-            } else {
-                let mut order: Vec<(f32, usize)> = (0..rows)
-                    .map(|row| (camera.project([0.0, 0.0, z_of(row)]).1, row))
-                    .collect();
-                order.sort_by(|a, b| b.0.total_cmp(&a.0));
-                for (_, row) in order {
-                    let levels = &surface.rows[skip + row];
-                    let z = z_of(row);
-                    let recent = row as f32 / (rows.max(2) - 1) as f32;
-                    let points: Vec<Pos2> = levels
-                        .iter()
-                        .enumerate()
-                        .map(|(band, db)| camera.screen([x_of(band), level(*db) * HEIGHT, z]))
-                        .collect();
-                    let base: Vec<Pos2> = (0..bands)
-                        .map(|band| camera.screen([x_of(band), 0.0, z]))
-                        .collect();
-                    let mut fill = Mesh::default();
-                    for (index, (top, bottom)) in points.iter().zip(&base).enumerate() {
-                        fill.colored_vertex(*top, alpha(BACKGROUND, 0.94));
-                        fill.colored_vertex(*bottom, alpha(BACKGROUND, 0.94));
-                        if index > 0 {
-                            let vertex = 2 * index as u32;
-                            fill.add_triangle(vertex - 2, vertex - 1, vertex);
-                            fill.add_triangle(vertex - 1, vertex + 1, vertex);
-                        }
-                    }
-                    clipped.add(Shape::mesh(fill));
-                    let color = view.palette.color(0.45 + 0.55 * recent);
-                    clipped.add(Shape::line(points, stroke(1.0 + 0.6 * recent, color)));
                 }
             }
         }
         SurfaceMode::Stereogram => {
+            let camera = Camera::new(settings, plot);
+            let clipped = painter.with_clip_rect(plot.shrink(1.0));
+            draw_floor(&clipped, &camera);
             let bands = surface.bands;
             if surface.stereo_db.len() != bands * PAN_COLUMNS {
                 return;
@@ -207,7 +181,8 @@ pub fn draw(
                     let base = view.palette.color(value);
                     let opposite =
                         (-surface.stereo_correlation[cell]).clamp(0.0, 1.0) * value.sqrt();
-                    view.colors.push(mix(base, ALERT, 0.8 * opposite));
+                    view.colors
+                        .push(mix(base, rgb(style.opposite), 0.8 * opposite));
                 }
             }
             let mesh = shaded_mesh(&camera, view, PAN_COLUMNS, bands);
@@ -224,6 +199,79 @@ pub fn draw(
         mono(9.0),
         TEXT_FAINT,
     );
+}
+
+/// One lane's spectrum history as ridges or a shaded surface.
+fn draw_spectrum_lane(
+    clipped: &Painter,
+    camera: &Camera,
+    view: &mut SurfaceView,
+    (surface, lane): (&SurfaceFrame, usize),
+    settings: &SurfaceSettings,
+    level: &dyn Fn(f32) -> f32,
+) {
+    let bands = surface.bands;
+    let depth = settings.depth.count();
+    let rows = surface.rows.len().min(depth);
+    let skip = surface.rows.len() - rows;
+    let band_range = lane * bands..(lane + 1) * bands;
+    let z_of = |row: usize| -1.0 + 2.0 * (rows - 1 - row) as f32 / (depth - 1) as f32;
+    let x_of = |band: usize| -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
+    draw_spectrum_axes(clipped, camera, surface.range_hz, depth);
+    if settings.mode == SurfaceMode::Surface {
+        view.points.clear();
+        view.colors.clear();
+        for (row, levels) in surface.rows.iter().skip(skip).enumerate() {
+            let age = (rows - 1 - row) as f32 / (depth - 1) as f32;
+            for (band, db) in levels[band_range.clone()].iter().enumerate() {
+                let value = level(*db);
+                view.points.push([x_of(band), value * HEIGHT, z_of(row)]);
+                let color = view.palette.color(value);
+                view.colors.push(fade(color, 1.0 - 0.35 * age));
+            }
+        }
+        let mesh = shaded_mesh(camera, view, bands, rows);
+        clipped.add(Shape::mesh(mesh));
+        return;
+    }
+    let mut order: Vec<(f32, usize)> = (0..rows)
+        .map(|row| (camera.project([0.0, 0.0, z_of(row)]).1, row))
+        .collect();
+    order.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (_, row) in order {
+        let levels = &surface.rows[skip + row][band_range.clone()];
+        let z = z_of(row);
+        let recent = row as f32 / (rows.max(2) - 1) as f32;
+        let points: Vec<Pos2> = levels
+            .iter()
+            .enumerate()
+            .map(|(band, db)| camera.screen([x_of(band), level(*db) * HEIGHT, z]))
+            .collect();
+        let base: Vec<Pos2> = (0..bands)
+            .map(|band| camera.screen([x_of(band), 0.0, z]))
+            .collect();
+        let mut fill = Mesh::default();
+        for (index, (top, bottom)) in points.iter().zip(&base).enumerate() {
+            fill.colored_vertex(*top, alpha(BACKGROUND, 0.94));
+            fill.colored_vertex(*bottom, alpha(BACKGROUND, 0.94));
+            if index > 0 {
+                let vertex = 2 * index as u32;
+                fill.add_triangle(vertex - 2, vertex - 1, vertex);
+                fill.add_triangle(vertex - 1, vertex + 1, vertex);
+            }
+        }
+        clipped.add(Shape::mesh(fill));
+        let color = view.palette.color(0.45 + 0.55 * recent);
+        clipped.add(Shape::line(points, stroke(1.0 + 0.6 * recent, color)));
+    }
+}
+
+/// A lane's name in its top left corner.
+fn lane_label(painter: &Painter, lane: Rect, name: &str) {
+    let galley = painter.layout_no_wrap(name.to_owned(), font(10.0), TEXT);
+    let tag = Rect::from_min_size(lane.min + vec2(6.0, 6.0), galley.size() + vec2(10.0, 4.0));
+    painter.rect_filled(tag, 3.0, alpha(Color32::BLACK, 0.55));
+    painter.galley(tag.min + vec2(5.0, 2.0), galley, TEXT);
 }
 
 /// `color` darkened by `factor` (one keeps it).

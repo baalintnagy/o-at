@@ -248,20 +248,23 @@ change its size. Its pages, in this order, show:
 | Overview | Any of the views at once, arranged as you like: switch each one on or off, drag a view's title onto another to move it beside, above or below it, and drag the gaps to resize. | Seven views, up to four rows; reset layout |
 | Spectral | Two layers: the sonogram, and on top of it the waveform of the same signal, aligned column by column (peak extent and RMS core), as in spectral editors. | Sonogram layer: opacity, brightness, contrast; waveform layer: opacity, gain (vertical zoom), linear or dB scale; and the sonogram options. The opacity sliders are logarithmic. |
 | Spectrum | Spectrum of left and right, mid and side, or one signal, with peak hold and a hover readout of frequency, note and level. | FFT 1K–32K, Hann, Blackman-Harris or flat-top window, averaging (off to infinite), 1/24–1/3 octave smoothing, 0/3/4.5 dB/oct slope, 60–120 dB range, 20 kHz or Nyquist, log, linear or semitone (ST) frequency scale |
-| Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, mid, side, left or right, log, linear or semitone (ST) frequency, 15–240 columns/s, range |
-| Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1–500 ms span; L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
+| Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, one signal (mid, side, left or right) or two stacked lanes (L · R or M · S), log, linear or semitone (ST) frequency, 15–240 columns/s, range |
+| Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1 ms – 60 s span (above 500 ms a scrolling roll view of the min/max envelope, without trigger); L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
 | Stereo | Goniometer, correlation and balance, mid and side levels, and the stereo position and width of 30 third-octave bands (red where they are out of phase). | Lissajous lines or dots, polar sample cloud or L/R scope; 512–4096 samples; automatic or fixed gain |
 | Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; reset |
-| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, wheel to zoom. | 64–256 bands, 32–128 rows, range, FFT, color maps |
+| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, wheel to zoom. | 64–256 bands, 32–128 rows, range, FFT, one scene or two stacked ones (L · R or M · S), heat map |
 
-**COLORS** sets the palette of every view: O-AT, Phosphor, Sunset, Ocean, Mono,
-Contrast (Okabe-Ito colors for color vision deficiencies) or Custom. Every color can be
-edited with a color picker: the accent, the left/mid, right and side traces, the plot
-background and the grid lines; editing one starts a Custom palette from the current one.
-The heat map of the sonogram, spectral and 3D views is one of four built-in maps or a
-custom map from three colors (quiet, middle, loud). The sonogram's **BRIGHTNESS** and
-**CONTRAST** tune how its levels map to the heat map. The settings, the layout and the selected page
-are stored with the session. **FREEZE** holds the
+Colors are set where they are used. **Right-click any diagram** for its view's
+colors, each with a color picker and, where it applies, an opacity, brightness or
+contrast slider: for example the spectrum's left/mid, right and side curves, fill and
+peak hold, the loudness meter's short-term and momentary lines and its on-target,
+too-loud and too-quiet colors, or the heat map of the sonogram, spectral and 3D views
+(four built-in maps or three custom colors). Every view keeps its own colors, on its
+page and in the overview. The diagrams' background and grid are shared by every view
+and appear in each menu. **THEME** colors only the controls (buttons, tabs, sliders,
+panel marks), with a preset (O-AT, Phosphor, Sunset, Ocean, Mono, Contrast with
+Okabe-Ito colors) or an accent of your own. The settings, the layout and the selected
+page are stored with the session. **FREEZE** holds the
 display while the measurements continue.
 
 The audio thread only copies samples into a lock-free ring. A worker thread measures

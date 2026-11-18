@@ -2,6 +2,7 @@
 
 mod colormap;
 mod loudness;
+mod menu;
 mod oscilloscope;
 mod overview;
 mod plot;
@@ -12,19 +13,16 @@ mod surface;
 
 use aud_ui::theme::{ALERT, BORDER, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::{button, pill, segmented, title};
-use egui::color_picker::{Alpha, color_edit_button_srgba};
 use egui::{
-    Align2, Color32, CornerRadius, CursorIcon, Id, Key, Pos2, Rect, Sense, StrokeKind, Ui,
-    UiBuilder, pos2, vec2,
+    Align2, Color32, CornerRadius, CursorIcon, Id, Key, Rect, Sense, StrokeKind, Ui, pos2, vec2,
 };
 
 use crate::analysis::{AnalysisShared, Published};
 use crate::layout::Module;
 use crate::settings::{
-    AnalyzerSettings, Choice, ColorMap, ColorScheme, Range, Rgb, SonogramSettings,
-    SpectralSettings, Tab,
+    AnalyzerSettings, Choice, Lanes, Range, Signal, SonogramSettings, SpectralSettings, Tab,
 };
-use crate::view::colormap::{Colors, Palette, rgb};
+use crate::view::colormap::Colors;
 use crate::view::plot::set_colors;
 use crate::window::WindowState;
 
@@ -55,7 +53,9 @@ pub struct ViewState {
     /// The results being drawn; kept while frozen.
     data: Published,
     frozen: bool,
-    colors_open: bool,
+    theme_open: bool,
+    /// The open right-click color menu.
+    menu: Option<menu::ViewMenu>,
     last_dropped: u64,
     overload_s: f32,
     spectrum: spectrum::SpectrumView,
@@ -79,6 +79,7 @@ pub fn draw(
     if !state.frozen {
         shared.with_published(|published| take(&mut state.data, published));
         state.sonogram.take_columns(&mut state.data);
+        state.oscilloscope.take_envelope(&mut state.data);
     }
     if state.data.dropped_frames != state.last_dropped {
         state.last_dropped = state.data.dropped_frames;
@@ -92,7 +93,7 @@ pub fn draw(
     set_colors(ui.ctx(), colors);
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
     let header = Rect::from_min_size(inner.min, vec2(inner.width(), HEADER_HEIGHT));
-    let colors_button = draw_header(ui, header, state, &mut settings, (&colors, window));
+    let theme_button = draw_header(ui, header, state, &mut settings, (&colors, window));
     let body = Rect::from_min_max(
         pos2(
             inner.left(),
@@ -101,9 +102,14 @@ pub fn draw(
         pos2(inner.right(), rect.bottom() - MARGIN),
     );
     let page = draw_page(ui, body, state, &mut settings, &colors);
-    let popover_open = state.colors_open;
-    if popover_open {
-        draw_colors_popover(ui, colors_button, state, &mut settings);
+    let popover_open = state.theme_open || state.menu.is_some();
+    if state.theme_open {
+        state.theme_open = menu::theme_panel(ui.ctx(), theme_button, &mut settings, &colors);
+    }
+    if let Some(open) = state.menu {
+        if !menu::view_menu(ui.ctx(), open, &mut settings, &colors) {
+            state.menu = None;
+        }
     }
     resize_grip(ui, rect, window, &colors);
     let (f11, escape) =
@@ -133,6 +139,7 @@ fn take(data: &mut Published, published: &mut Published) {
     data.sonogram.generation = published.sonogram.generation;
     data.sonogram.range_hz = published.sonogram.range_hz;
     data.sonogram.scale = published.sonogram.scale;
+    data.sonogram.lanes = published.sonogram.lanes;
     data.sonogram
         .columns
         .extend(published.sonogram.columns.drain(..));
@@ -142,6 +149,8 @@ fn take(data: &mut Published, published: &mut Published) {
     data.loudness = published.loudness;
     data.loudness_history
         .clone_from(&published.loudness_history);
+    data.envelope_generation = published.envelope_generation;
+    data.envelope.extend(published.envelope.drain(..));
     data.dropped_frames = published.dropped_frames;
     data.sequence = published.sequence;
 }
@@ -153,7 +162,7 @@ struct Actions {
     reset_peaks: bool,
 }
 
-/// Draws the header and the page tabs; returns the COLORS button's rectangle.
+/// Draws the header and the page tabs; returns the THEME button's rectangle.
 fn draw_header(
     ui: &mut Ui,
     rect: Rect,
@@ -200,22 +209,23 @@ fn draw_header(
     {
         state.frozen = !state.frozen;
     }
-    let colors_button = Rect::from_min_size(
+    let theme_button = Rect::from_min_size(
         pos2(freeze.left() - 84.0, centre_y - 11.0),
         vec2(76.0, 22.0),
     );
     if button(
         ui,
-        Id::new("colors"),
-        colors_button,
-        "COLORS",
+        Id::new("theme"),
+        theme_button,
+        "THEME",
         colors.accent,
-        state.colors_open,
+        state.theme_open,
     )
-    .on_hover_text("Trace colors and heat map of every view")
+    .on_hover_text("Colors of the controls and of every diagram's background and grid")
     .clicked()
     {
-        state.colors_open = !state.colors_open;
+        state.theme_open = !state.theme_open;
+        state.menu = None;
     }
     let data = &state.data;
     let (status, color, lit) = if data.sample_rate == 0 {
@@ -230,7 +240,7 @@ fn draw_header(
         ("NO SIGNAL", TEXT_DIM, false)
     };
     let status_rect = Rect::from_min_size(
-        pos2(colors_button.left() - 104.0, centre_y - 9.0),
+        pos2(theme_button.left() - 104.0, centre_y - 9.0),
         vec2(92.0, 18.0),
     );
     pill(ui, status_rect, status, color, lit);
@@ -264,180 +274,21 @@ fn draw_header(
         tabs.center().y,
         stroke(1.0, BORDER),
     );
-    colors_button
+    theme_button
 }
 
-/// The color settings, below the COLORS button and above everything else.
-fn draw_colors_popover(
-    ui: &mut Ui,
-    anchor: Rect,
-    state: &mut ViewState,
-    settings: &mut AnalyzerSettings,
-) {
-    let size = vec2(620.0, 196.0);
-    let rect = Rect::from_min_size(
-        pos2(anchor.right() + 184.0 - size.x, anchor.bottom() + 8.0),
-        size,
-    );
-    // Covers the page below, so clicks inside do not reach it.
-    ui.interact(rect, Id::new("colors-popover"), Sense::click());
-    let picking = ui.memory(|memory| memory.any_popup_open());
-    let outside = ui.input(|input| {
-        input.pointer.any_pressed()
-            && input
-                .pointer
-                .interact_pos()
-                .is_some_and(|pointer| !rect.contains(pointer) && !anchor.contains(pointer))
-    });
-    if (outside && !picking) || ui.input(|input| input.key_pressed(Key::Escape)) {
-        state.colors_open = false;
+/// The view a page shows; `None` for the overview.
+fn page_module(tab: Tab) -> Option<Module> {
+    match tab {
+        Tab::Overview => None,
+        Tab::Spectral => Some(Module::Spectral),
+        Tab::Spectrum => Some(Module::Spectrum),
+        Tab::Sonogram => Some(Module::Sonogram),
+        Tab::Oscilloscope => Some(Module::Oscilloscope),
+        Tab::Stereo => Some(Module::Stereo),
+        Tab::Loudness => Some(Module::Loudness),
+        Tab::Surface => Some(Module::Surface),
     }
-    let colors = Colors::new(settings);
-    ui.painter().rect(
-        rect,
-        CornerRadius::same(6),
-        PANEL,
-        stroke(1.0, colors.accent),
-        StrokeKind::Inside,
-    );
-    let left = rect.left() + 14.0;
-    let label_width = 74.0;
-    let caption = |ui: &Ui, y: f32, text: &str| {
-        ui.painter().text(
-            pos2(left, y + 11.0),
-            Align2::LEFT_CENTER,
-            text,
-            font(10.0),
-            TEXT_DIM,
-        );
-    };
-    let label = |ui: &Ui, x: f32, y: f32, text: &str| {
-        ui.painter().text(
-            pos2(x + 30.0, y + 11.0),
-            Align2::LEFT_CENTER,
-            text,
-            font(10.0),
-            TEXT_DIM,
-        );
-    };
-
-    let top = rect.top() + 14.0;
-    caption(ui, top, "PALETTE");
-    let schemes = Rect::from_min_max(
-        pos2(left + label_width, top),
-        pos2(rect.right() - 14.0, top + 22.0),
-    );
-    if let Some(index) = segmented(
-        ui,
-        "color-scheme",
-        schemes,
-        ColorScheme::LABELS,
-        settings.scheme.index(),
-        colors.accent,
-    ) {
-        settings.scheme = ColorScheme::from_index(index);
-    }
-
-    // Each role's color; editing one switches to the CUSTOM scheme.
-    let roles_top = top + 34.0;
-    caption(ui, roles_top, "COLORS");
-    let mut custom = Colors::custom_from(settings.scheme, &settings.custom);
-    let mut edited = false;
-    let roles: [(&str, &mut Rgb); 6] = [
-        ("accent", &mut custom.accent),
-        ("left · mid", &mut custom.primary),
-        ("right", &mut custom.secondary),
-        ("side", &mut custom.side),
-        ("plot", &mut custom.plot),
-        ("grid", &mut custom.grid),
-    ];
-    for (index, (text, value)) in roles.into_iter().enumerate() {
-        let x = left + label_width + index as f32 * 88.0;
-        edited |= color_swatch(ui, pos2(x, roles_top), ("role", index), value);
-        label(ui, x, roles_top, text);
-    }
-    if edited {
-        settings.custom = custom;
-        settings.scheme = ColorScheme::Custom;
-    }
-
-    let heat_top = roles_top + 44.0;
-    caption(ui, heat_top, "HEAT MAP");
-    let maps = Rect::from_min_max(
-        pos2(left + label_width, heat_top),
-        pos2(left + label_width + 340.0, heat_top + 22.0),
-    );
-    if let Some(index) = segmented(
-        ui,
-        "color-map",
-        maps,
-        ColorMap::LABELS,
-        settings.colormap.index(),
-        colors.accent,
-    ) {
-        settings.colormap = ColorMap::from_index(index);
-    }
-    let palette = Palette::new(Colors::new(settings).heat);
-    let ramp = Rect::from_min_max(
-        pos2(maps.right() + 14.0, maps.top() + 4.0),
-        pos2(rect.right() - 14.0, maps.bottom() - 4.0),
-    );
-    let steps = 48;
-    for step in 0..steps {
-        let fraction = step as f32 / steps as f32;
-        let x = ramp.left() + ramp.width() * fraction;
-        ui.painter().rect_filled(
-            Rect::from_min_max(
-                pos2(x, ramp.top()),
-                pos2(x + ramp.width() / steps as f32 + 0.5, ramp.bottom()),
-            ),
-            0.0,
-            palette.color(fraction),
-        );
-    }
-
-    // The custom heat map's stops; editing one switches to the CUSTOM heat map.
-    let stops_top = heat_top + 32.0;
-    let mut heat = settings.custom.heat;
-    let mut heat_edited = false;
-    for (index, (text, value)) in ["quiet", "middle", "loud"]
-        .into_iter()
-        .zip(heat.iter_mut())
-        .enumerate()
-    {
-        let x = left + label_width + index as f32 * 88.0;
-        heat_edited |= color_swatch(ui, pos2(x, stops_top), ("heat", index), value);
-        label(ui, x, stops_top, text);
-    }
-    if heat_edited {
-        settings.custom.heat = heat;
-        settings.colormap = ColorMap::Custom;
-    }
-    ui.painter().text(
-        pos2(left, rect.bottom() - 12.0),
-        Align2::LEFT_CENTER,
-        "Click a color to edit it; editing switches to CUSTOM. Applies to every view and is \
-         saved with the session.",
-        font(10.0),
-        TEXT_FAINT,
-    );
-}
-
-/// A color button that opens a picker; returns `true` when the color changed.
-fn color_swatch(ui: &mut Ui, position: Pos2, key: (&str, usize), value: &mut Rgb) -> bool {
-    let mut color = rgb(*value);
-    let rect = Rect::from_min_size(position, vec2(24.0, 22.0));
-    let changed = ui
-        .allocate_new_ui(UiBuilder::new().max_rect(rect).id_salt(key), |ui| {
-            ui.spacing_mut().interact_size = vec2(24.0, 22.0);
-            color_edit_button_srgba(ui, &mut color, Alpha::Opaque).changed()
-        })
-        .inner;
-    if changed {
-        let [r, g, b, _] = color.to_array();
-        *value = [r, g, b];
-    }
-    changed
 }
 
 /// A grip in the lower right corner that resizes the window.
@@ -479,9 +330,9 @@ fn draw_page(
     settings: &mut AnalyzerSettings,
     colors: &Colors,
 ) -> Actions {
-    if settings.tab == Tab::Overview {
+    let Some(module) = page_module(settings.tab) else {
         return overview::draw(ui, body, state, settings, colors);
-    }
+    };
     let mut toolbar = Toolbar::new(body, colors.accent);
     let mut actions = Actions::default();
     match settings.tab {
@@ -536,10 +387,17 @@ fn draw_page(
                 toolbar.choice(ui, "DEPTH", &mut surface.depth, 36.0);
                 toolbar.choice(ui, "RANGE", &mut surface.range, 52.0);
                 toolbar.choice(ui, "FFT", &mut settings.sonogram.fft, 40.0);
+                toolbar.choice(ui, "CHANNELS", &mut settings.sonogram.channels, 50.0);
+                if settings.sonogram.channels == Lanes::Single {
+                    toolbar.choice(ui, "SIGNAL", &mut settings.sonogram.signal, 46.0);
+                }
             } else {
                 let sonogram = &mut settings.sonogram;
                 toolbar.choice(ui, "FFT", &mut sonogram.fft, 40.0);
-                toolbar.choice(ui, "SIGNAL", &mut sonogram.signal, 46.0);
+                toolbar.choice(ui, "CHANNELS", &mut sonogram.channels, 50.0);
+                if sonogram.channels == Lanes::Single {
+                    toolbar.choice(ui, "SIGNAL", &mut sonogram.signal, 46.0);
+                }
                 toolbar.choice(ui, "SCALE", &mut sonogram.scale, 38.0);
                 toolbar.choice(ui, "SPEED", &mut sonogram.speed, 44.0);
                 toolbar.choice(ui, "RANGE", &mut sonogram.range, 52.0);
@@ -559,7 +417,9 @@ fn draw_page(
                     |contrast| format!("{contrast:.2}×"),
                 );
             }
-            toolbar.choice(ui, "HEAT", &mut settings.colormap, 56.0);
+            if let Some(heat) = settings.styles.heat_mut(module) {
+                toolbar.choice(ui, "HEAT", &mut heat.map, 56.0);
+            }
             if settings.tab == Tab::Surface && toolbar.action(ui, "RESET VIEW") {
                 settings.surface.reset_camera();
             }
@@ -573,7 +433,7 @@ fn draw_page(
         }
         Tab::Oscilloscope => {
             let scope = &mut settings.oscilloscope;
-            toolbar.choice(ui, "TIME ms", &mut scope.span, 34.0);
+            toolbar.choice(ui, "TIME", &mut scope.span, 34.0);
             toolbar.choice(ui, "CHANNELS", &mut scope.channels, 50.0);
             toolbar.choice(ui, "TRIGGER", &mut scope.trigger, 42.0);
             toolbar.choice(ui, "SOURCE", &mut scope.source, 46.0);
@@ -589,16 +449,7 @@ fn draw_page(
         }
     }
     let area = toolbar.rest(body);
-    let module = match settings.tab {
-        Tab::Overview | Tab::Spectrum => Module::Spectrum,
-        Tab::Sonogram => Module::Sonogram,
-        Tab::Spectral => Module::Spectral,
-        Tab::Stereo => Module::Stereo,
-        Tab::Oscilloscope => Module::Oscilloscope,
-        Tab::Loudness => Module::Loudness,
-        Tab::Surface => Module::Surface,
-    };
-    draw_module(ui, area, module, state, settings, colors, false);
+    draw_module(ui, area, module, state, settings, (colors, false));
     actions
 }
 
@@ -609,9 +460,24 @@ fn draw_module(
     module: Module,
     state: &mut ViewState,
     settings: &mut AnalyzerSettings,
-    colors: &Colors,
-    compact: bool,
+    (colors, compact): (&Colors, bool),
 ) {
+    // A right click on a view opens its color menu there.
+    let right_click = ui.input(|input| {
+        input
+            .pointer
+            .secondary_clicked()
+            .then(|| input.pointer.interact_pos())
+            .flatten()
+    });
+    if let Some(pointer) = right_click.filter(|pointer| rect.contains(*pointer)) {
+        state.menu = Some(menu::ViewMenu {
+            module,
+            at: pointer,
+        });
+        state.theme_open = false;
+    }
+    let styles = &settings.styles;
     let data = &state.data;
     match module {
         Module::Spectrum => spectrum::draw(
@@ -620,7 +486,7 @@ fn draw_module(
             &mut state.spectrum,
             data,
             &mut settings.spectrum,
-            colors,
+            (colors, &styles.spectrum),
             compact,
         ),
         Module::Sonogram => sonogram::draw(
@@ -629,7 +495,7 @@ fn draw_module(
             &mut state.sonogram,
             data,
             &settings.sonogram,
-            colors,
+            (colors, &styles.sonogram),
             compact,
         ),
         Module::Spectral => sonogram::draw_spectral(
@@ -638,7 +504,7 @@ fn draw_module(
             &mut state.sonogram,
             data,
             (&settings.sonogram, &settings.spectral),
-            colors,
+            (colors, &styles.spectral),
         ),
         Module::Stereo => stereo::draw(
             ui,
@@ -646,7 +512,7 @@ fn draw_module(
             &mut state.stereo,
             data,
             &mut settings.stereo,
-            colors,
+            (colors, &styles.stereo),
             compact,
             state.frozen,
         ),
@@ -656,19 +522,35 @@ fn draw_module(
             &mut state.oscilloscope,
             data,
             &mut settings.oscilloscope,
-            colors,
+            (colors, &styles.oscilloscope),
             state.frozen,
         ),
-        Module::Loudness => loudness::draw(ui, rect, data, &mut settings.loudness, colors, compact),
+        Module::Loudness => loudness::draw(
+            ui,
+            rect,
+            data,
+            &mut settings.loudness,
+            (colors, &styles.loudness),
+            compact,
+        ),
         Module::Surface => surface::draw(
             ui,
             rect,
             &mut state.surface,
             data,
             &mut settings.surface,
-            colors,
+            (colors, &styles.surface, lane_names(&settings.sonogram)),
         ),
     }
+}
+
+/// Names of the sonogram lanes' signals; the second is empty with one lane.
+fn lane_names(sonogram: &SonogramSettings) -> [&'static str; 2] {
+    let (first, second) = sonogram.signals();
+    [
+        Signal::LABELS[first.index()],
+        second.map_or("", |signal| Signal::LABELS[signal.index()]),
+    ]
 }
 
 /// Lays out labelled controls from left to right, wrapping into new rows.

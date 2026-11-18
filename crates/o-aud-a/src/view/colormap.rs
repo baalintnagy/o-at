@@ -1,49 +1,24 @@
-//! Colors: the trace and accent colors of a scheme, and the heat maps of the sonogram,
-//! spectral and 3D views.
+//! Colors: the theme's accent for the controls, the diagrams' shared background and grid,
+//! and heat maps.
 
 use std::array;
 
-use aud_ui::theme::{GRID, GRID_STRONG};
 use egui::Color32;
 
-use crate::settings::{AnalyzerSettings, ColorMap, ColorScheme, CustomColors, Rgb};
+use crate::settings::{AnalyzerSettings, ColorMap, ColorScheme};
+use crate::style::{HeatStyle, Paint, Rgb};
 
-/// Plot background of the built-in schemes.
-const PLOT: Rgb = [0x13, 0x15, 0x1a];
-
-/// A heat map: a built-in one, or the custom stops.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Heat {
-    pub map: ColorMap,
-    pub custom: [Rgb; 3],
-}
-
-impl Default for Heat {
-    fn default() -> Self {
-        Self {
-            map: ColorMap::default(),
-            custom: CustomColors::default().heat,
-        }
-    }
-}
-
-/// The colors of every view for one frame.
+/// The theme's accent and the diagram background and grid, for one frame. View colors
+/// come from each view's style.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Colors {
     /// Panel marks, selected controls and highlights.
     pub accent: Color32,
-    /// The first trace: left, mid or a single signal.
-    pub primary: Color32,
-    /// The second trace: right.
-    pub secondary: Color32,
-    /// The side signal.
-    pub side: Color32,
-    /// Plot backgrounds.
+    /// Diagram backgrounds.
     pub plot: Color32,
     pub grid: Color32,
     /// Emphasized grid lines: zero, labelled frequencies.
     pub grid_strong: Color32,
-    pub heat: Heat,
 }
 
 /// Converts a stored color.
@@ -51,82 +26,49 @@ pub fn rgb([r, g, b]: Rgb) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-/// The trace roles of a built-in scheme: accent, primary, secondary and side.
-fn preset(scheme: ColorScheme) -> [Rgb; 4] {
-    let hex = |value: u32| [(value >> 16) as u8, (value >> 8) as u8, value as u8];
-    let values = match scheme {
-        ColorScheme::Oat | ColorScheme::Custom => [0xc6e05a, 0xc6e05a, 0x5ca8ff, 0xa48bfa],
-        ColorScheme::Phosphor => [0x4cff8a, 0x4cff8a, 0xf5d04c, 0x3cd6c0],
-        ColorScheme::Sunset => [0xff8a3d, 0xff8a3d, 0xff5c9a, 0xf5d04c],
-        ColorScheme::Ocean => [0x3cd6c0, 0x3cd6c0, 0x5ca8ff, 0x9b8cff],
-        ColorScheme::Mono => [0xe6e9ef, 0xe6e9ef, 0x8a93a3, 0xb0b6c2],
-        // Okabe-Ito colors, distinguishable with color vision deficiencies.
-        ColorScheme::Contrast => [0xe69f00, 0xe69f00, 0x56b4e9, 0xcc79a7],
-    };
-    values.map(hex)
+/// A stored color with its opacity.
+pub fn paint(paint: Paint) -> Color32 {
+    let [r, g, b] = paint.color;
+    Color32::from_rgba_unmultiplied(r, g, b, (paint.opacity.clamp(0.0, 1.0) * 255.0) as u8)
 }
 
-/// `color` blended towards white by `amount` (0..1).
+/// `color` blended towards white by `amount` (0..1), keeping its opacity.
 pub fn lighten(color: Color32, amount: f32) -> Color32 {
-    let [r, g, b, _] = color.to_array();
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
     let blend = |value: u8| (f32::from(value) + (255.0 - f32::from(value)) * amount).round() as u8;
-    Color32::from_rgb(blend(r), blend(g), blend(b))
+    Color32::from_rgba_unmultiplied(blend(r), blend(g), blend(b), a)
+}
+
+/// The accent of a built-in theme; CUSTOM has its own.
+fn theme_accent(scheme: ColorScheme, custom: Rgb) -> Rgb {
+    let hex = |value: u32| [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+    match scheme {
+        ColorScheme::Oat => hex(0xc6e05a),
+        ColorScheme::Phosphor => hex(0x4cff8a),
+        ColorScheme::Sunset => hex(0xff8a3d),
+        ColorScheme::Ocean => hex(0x3cd6c0),
+        ColorScheme::Mono => hex(0xe6e9ef),
+        // Okabe-Ito orange, distinguishable with color vision deficiencies.
+        ColorScheme::Contrast => hex(0xe69f00),
+        ColorScheme::Custom => custom,
+    }
 }
 
 impl Colors {
     /// The colors the settings select.
     pub fn new(settings: &AnalyzerSettings) -> Self {
-        let custom = &settings.custom;
-        let heat = Heat {
-            map: settings.colormap,
-            custom: custom.heat,
-        };
-        if settings.scheme == ColorScheme::Custom {
-            let grid = rgb(custom.grid);
-            return Self {
-                accent: rgb(custom.accent),
-                primary: rgb(custom.primary),
-                secondary: rgb(custom.secondary),
-                side: rgb(custom.side),
-                plot: rgb(custom.plot),
-                grid,
-                grid_strong: lighten(grid, 0.1),
-                heat,
-            };
-        }
-        let [accent, primary, secondary, side] = preset(settings.scheme).map(rgb);
+        let grid = paint(settings.plot.grid);
         Self {
-            accent,
-            primary,
-            secondary,
-            side,
-            plot: rgb(PLOT),
-            grid: GRID,
-            grid_strong: GRID_STRONG,
-            heat,
+            accent: rgb(theme_accent(settings.scheme, settings.accent)),
+            plot: paint(settings.plot.background),
+            grid,
+            grid_strong: lighten(grid, 0.12),
         }
     }
 
-    /// The built-in scheme's colors as custom colors, as a starting point for editing.
-    pub fn custom_from(scheme: ColorScheme, current: &CustomColors) -> CustomColors {
-        if scheme == ColorScheme::Custom {
-            return *current;
-        }
-        let [accent, primary, secondary, side] = preset(scheme);
-        CustomColors {
-            accent,
-            primary,
-            secondary,
-            side,
-            plot: PLOT,
-            grid: GRID.to_array()[..3].try_into().unwrap_or(current.grid),
-            heat: current.heat,
-        }
-    }
-
-    /// The second trace's color for a pair of curves: side next to mid, else secondary.
-    pub fn second(&self, side: bool) -> Color32 {
-        if side { self.side } else { self.secondary }
+    /// A theme's accent, as the starting point for a custom one.
+    pub fn accent_of(scheme: ColorScheme, custom: Rgb) -> Rgb {
+        theme_accent(scheme, custom)
     }
 }
 
@@ -165,24 +107,24 @@ const GRAY: [Rgb; 2] = [[0x0b, 0x0d, 0x12], [0xff, 0xff, 0xff]];
 /// Lookup table of 256 colors from quiet to loud.
 #[derive(Clone, Debug)]
 pub struct Palette {
-    heat: Heat,
+    heat: HeatStyle,
     colors: [Color32; 256],
 }
 
 impl Default for Palette {
     fn default() -> Self {
-        Self::new(Heat::default())
+        Self::new(HeatStyle::default())
     }
 }
 
 impl Palette {
-    pub fn new(heat: Heat) -> Self {
+    pub fn new(heat: HeatStyle) -> Self {
         let stops: &[Rgb] = match heat.map {
             ColorMap::Ember => &EMBER,
             ColorMap::Viridis => &VIRIDIS,
             ColorMap::Ice => &ICE,
             ColorMap::Gray => &GRAY,
-            ColorMap::Custom => &heat.custom,
+            ColorMap::Custom => &heat.stops,
         };
         let segments = (stops.len() - 1) as f32;
         let colors = array::from_fn(|index| {
@@ -199,7 +141,7 @@ impl Palette {
         Self { heat, colors }
     }
 
-    pub fn heat(&self) -> Heat {
+    pub fn heat(&self) -> HeatStyle {
         self.heat
     }
 
@@ -213,38 +155,45 @@ impl Palette {
 mod tests {
     use egui::Color32;
 
-    use super::{Colors, Heat, Palette, rgb};
-    use crate::settings::{AnalyzerSettings, ColorMap, ColorScheme, CustomColors};
+    use super::{Colors, Palette, paint, rgb};
+    use crate::settings::{AnalyzerSettings, ColorMap, ColorScheme};
+    use crate::style::{HeatStyle, Paint};
 
     #[test]
     fn palettes_run_from_dark_to_bright() {
-        let palette = Palette::new(Heat {
+        let palette = Palette::new(HeatStyle {
             map: ColorMap::Gray,
-            ..Heat::default()
+            ..HeatStyle::default()
         });
         assert_eq!(palette.color(1.0), Color32::WHITE);
         assert_eq!(palette.color(2.0), Color32::WHITE);
         assert_eq!(palette.color(-0.5), palette.color(0.0));
-        let custom = Palette::new(Heat {
+        let custom = Palette::new(HeatStyle {
             map: ColorMap::Custom,
-            custom: [[0, 0, 0], [255, 0, 0], [255, 255, 255]],
+            stops: [[0, 0, 0], [255, 0, 0], [255, 255, 255]],
         });
         let [red, green, blue, _] = custom.color(0.5).to_array();
         assert!(red == 255 && green <= 2 && blue <= 2, "the middle stop");
     }
 
     #[test]
-    fn custom_schemes_use_their_colors_and_start_from_a_preset() {
-        let mut settings = AnalyzerSettings::default();
-        let start = Colors::custom_from(ColorScheme::Sunset, &CustomColors::default());
-        assert_eq!(start.accent, [0xff, 0x8a, 0x3d]);
-        settings.custom = CustomColors {
-            secondary: [1, 2, 3],
-            ..start
+    fn the_theme_only_sets_the_accent() {
+        let mut settings = AnalyzerSettings {
+            scheme: ColorScheme::Sunset,
+            ..AnalyzerSettings::default()
         };
+        let sunset = Colors::new(&settings);
+        assert_eq!(sunset.accent, rgb([0xff, 0x8a, 0x3d]));
+        settings.scheme = ColorScheme::Oat;
+        let oat = Colors::new(&settings);
+        assert_eq!(sunset.plot, oat.plot, "diagrams do not follow the theme");
         settings.scheme = ColorScheme::Custom;
-        let colors = Colors::new(&settings);
-        assert_eq!(colors.secondary, rgb([1, 2, 3]));
-        assert_eq!(colors.accent, rgb([0xff, 0x8a, 0x3d]));
+        settings.accent = [1, 2, 3];
+        assert_eq!(Colors::new(&settings).accent, rgb([1, 2, 3]));
+        settings.plot.grid = Paint {
+            color: [10, 20, 30],
+            opacity: 0.5,
+        };
+        assert_eq!(Colors::new(&settings).grid, paint(settings.plot.grid));
     }
 }

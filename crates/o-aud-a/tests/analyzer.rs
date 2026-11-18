@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use assert_no_alloc::assert_no_alloc;
 use o_aud_a::analysis::Analyzer;
 use o_aud_a::capture::capture;
-use o_aud_a::settings::{AnalyzerSettings, Averaging, ChannelMode, Window};
+use o_aud_a::settings::{AnalyzerSettings, Averaging, ChannelMode, Choice, Lanes, Signal, Window};
 
 const RATE: u32 = 48_000;
 const BLOCK: usize = 480;
@@ -47,6 +47,7 @@ fn worker_measures_loudness_spectrum_and_stereo() {
         settings.spectrum.channels = ChannelMode::LeftRight;
         settings.spectrum.averaging = Averaging::Off;
         settings.spectrum.window = Window::FlatTop;
+        settings.sonogram.channels = Lanes::LeftRight;
     }
     let analyzer = Analyzer::start(consumer, stream, Arc::clone(&settings));
     let shared = Arc::clone(analyzer.shared());
@@ -68,10 +69,11 @@ fn worker_measures_loudness_spectrum_and_stereo() {
             thread::sleep(Duration::from_millis(2));
         }
     }
+    // Wait for every block, so no audio is measured after the reset below.
     loop {
         shared.mark_viewed();
         let done = shared.with_published(|published| {
-            published.loudness.duration_s >= 4.9 && !published.spectrum.primary_db.is_empty()
+            published.loudness.duration_s >= 4.999 && !published.spectrum.primary_db.is_empty()
         });
         if done {
             break;
@@ -94,6 +96,19 @@ fn worker_measures_loudness_spectrum_and_stereo() {
         assert!((level + 23.0).abs() < 0.2, "spectrum peak {level:.2} dB");
         assert!(!published.loudness_history.is_empty());
         assert!(!published.surface.rows.is_empty(), "3D history is recorded");
+        // Both lanes reach the editor in the sonogram feed.
+        assert_eq!(
+            published.sonogram.lanes, 2,
+            "the sonogram reports two lanes"
+        );
+        assert_eq!(
+            published.surface.lanes, 2,
+            "the 3D history reports two lanes"
+        );
+        // Millisecond envelope buckets for long oscilloscope spans.
+        let bucket = published.envelope.back().expect("envelope buckets");
+        assert!((bucket[Signal::Left.index()][1] - amplitude).abs() < 0.01);
+        assert!(published.envelope.len() > 1_000);
         assert_eq!(published.dropped_frames, 0);
     });
 

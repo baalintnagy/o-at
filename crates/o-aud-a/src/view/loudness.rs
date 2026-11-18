@@ -10,7 +10,8 @@ use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Shape, StrokeKind
 use crate::analysis::loudness::LoudnessReading;
 use crate::analysis::{Published, history_entries};
 use crate::settings::{LoudnessScale, LoudnessSettings};
-use crate::view::colormap::Colors;
+use crate::style::LoudnessStyle;
+use crate::view::colormap::{Colors, paint, rgb};
 use crate::view::plot::{Header, grid, plot_background, text_width};
 
 /// Shown loudness range around the target in LU.
@@ -48,15 +49,15 @@ fn peak_text(db: f32) -> String {
 }
 
 /// Color of a loudness compared with the target.
-fn target_color(lufs: f32, target: f32, colors: &Colors) -> Color32 {
+fn target_color(lufs: f32, target: f32, style: &LoudnessStyle) -> Color32 {
     if !lufs.is_finite() {
         TEXT_DIM
     } else if lufs > target + TOLERANCE_LU {
-        METER_WARN
+        rgb(style.too_loud)
     } else if lufs < target - TOLERANCE_LU {
-        colors.secondary
+        rgb(style.too_quiet)
     } else {
-        colors.primary
+        rgb(style.on_target)
     }
 }
 
@@ -80,7 +81,7 @@ pub fn draw(
     rect: Rect,
     data: &Published,
     settings: &mut LoudnessSettings,
-    colors: &Colors,
+    (colors, style): (&Colors, &LoudnessStyle),
     compact: bool,
 ) {
     panel(ui, rect, "LOUDNESS", colors.accent);
@@ -107,18 +108,18 @@ pub fn draw(
             content.min,
             pos2(content.left() + content.width() * 0.55, content.bottom()),
         );
-        draw_readouts(&painter, readouts, reading, (settings, colors), true);
+        draw_readouts(&painter, readouts, reading, (settings, style), true);
         let meters = Rect::from_min_max(pos2(readouts.right() + 8.0, content.top()), content.max);
-        draw_bars(&painter, meters, reading, (settings, colors));
+        draw_bars(&painter, meters, reading, (settings, style));
         return;
     }
     let readouts = Rect::from_min_size(content.min, vec2(300.0, content.height()));
-    draw_readouts(&painter, readouts, reading, (settings, colors), false);
+    draw_readouts(&painter, readouts, reading, (settings, style), false);
     let bars = Rect::from_min_size(
         pos2(readouts.right() + 16.0, content.top()),
         vec2(170.0, content.height()),
     );
-    draw_bars(&painter, bars, reading, (settings, colors));
+    draw_bars(&painter, bars, reading, (settings, style));
     let history = Rect::from_min_max(
         pos2(bars.right() + 44.0, content.top() + 18.0),
         pos2(content.right(), content.bottom() - 72.0),
@@ -132,8 +133,8 @@ pub fn draw(
     );
     let mut x = history.left() + 60.0;
     for (label, color) in [
-        ("short-term", colors.primary),
-        ("momentary", alpha(TEXT, 0.45)),
+        ("short-term", paint(style.short_term)),
+        ("momentary", paint(style.momentary)),
     ] {
         painter.rect_filled(
             Rect::from_center_size(pos2(x, content.top() + 6.0), vec2(10.0, 3.0)),
@@ -149,19 +150,19 @@ pub fn draw(
         );
         x = end.right() + 16.0;
     }
-    draw_history(&painter, history, data, (settings, colors));
+    draw_history(&painter, history, data, (settings, style));
     let peaks = Rect::from_min_max(
         pos2(history.left() - 34.0, history.bottom() + 26.0),
         pos2(content.right(), content.bottom()),
     );
-    draw_true_peaks(&painter, peaks, reading, colors);
+    draw_true_peaks(&painter, peaks, reading, style);
 }
 
 fn draw_readouts(
     painter: &Painter,
     rect: Rect,
     reading: &LoudnessReading,
-    (settings, colors): (&LoudnessSettings, &Colors),
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
     compact: bool,
 ) {
     let target = settings.target.lufs();
@@ -179,7 +180,7 @@ fn draw_readouts(
         Align2::LEFT_TOP,
         loudness_text(reading.integrated_lufs, settings),
         mono(big),
-        target_color(reading.integrated_lufs, target, colors),
+        target_color(reading.integrated_lufs, target, style),
     );
     painter.text(
         pos2(value.right() + 6.0, value.bottom() - 6.0),
@@ -205,7 +206,7 @@ fn draw_readouts(
         Align2::LEFT_TOP,
         delta,
         font(11.0),
-        target_color(reading.integrated_lufs, target, colors),
+        target_color(reading.integrated_lufs, target, style),
     );
     let true_peak = reading.true_peak_max_db[0].max(reading.true_peak_max_db[1]);
     let plr = if true_peak.is_finite() && reading.integrated_lufs.is_finite() {
@@ -329,7 +330,7 @@ fn draw_bars(
     painter: &Painter,
     rect: Rect,
     reading: &LoudnessReading,
-    (settings, colors): (&LoudnessSettings, &Colors),
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
     let target = settings.target.lufs();
     let (floor, top) = (target - BELOW_TARGET_LU, target + ABOVE_TARGET_LU);
@@ -382,7 +383,7 @@ fn draw_bars(
             painter.rect_filled(
                 Rect::from_min_max(pos2(bar.left(), y_of(value)), bar.right_bottom()),
                 CornerRadius::same(2),
-                target_color(value, target, colors),
+                target_color(value, target, style),
             );
         }
         if let Some(max) = max.filter(|max| max.is_finite()) {
@@ -412,7 +413,7 @@ fn draw_history(
     painter: &Painter,
     rect: Rect,
     data: &Published,
-    (settings, colors): (&LoudnessSettings, &Colors),
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
     plot_background(painter, rect);
     let target = settings.target.lufs();
@@ -427,7 +428,7 @@ fn draw_history(
             y_of(target + TOLERANCE_LU)..=y_of(target - TOLERANCE_LU),
         ),
         CornerRadius::ZERO,
-        alpha(colors.primary, 0.08),
+        alpha(rgb(style.on_target), 0.08),
     );
     let mut lu = -30;
     while lu <= 12 {
@@ -493,7 +494,10 @@ fn draw_history(
         rect.right() - rect.width() * (shown - 1 - index) as f32 / entries.max(2) as f32
     };
     let clipped = painter.with_clip_rect(rect.shrink(1.0));
-    for (side, color, width) in [(0, alpha(TEXT, 0.45), 1.0), (1, colors.primary, 1.8)] {
+    for (side, color, width) in [
+        (0, paint(style.momentary), 1.0),
+        (1, paint(style.short_term), 1.8),
+    ] {
         let points: Vec<Pos2> = history
             .range(start..)
             .enumerate()
@@ -505,7 +509,12 @@ fn draw_history(
     }
 }
 
-fn draw_true_peaks(painter: &Painter, rect: Rect, reading: &LoudnessReading, colors: &Colors) {
+fn draw_true_peaks(
+    painter: &Painter,
+    rect: Rect,
+    reading: &LoudnessReading,
+    style: &LoudnessStyle,
+) {
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
@@ -543,7 +552,7 @@ fn draw_true_peaks(painter: &Painter, rect: Rect, reading: &LoudnessReading, col
             } else if level > -9.0 {
                 METER_WARN
             } else {
-                colors.primary
+                rgb(style.on_target)
             };
             painter.rect_filled(
                 Rect::from_min_max(bar.min, pos2(x_of(level), bar.bottom())),

@@ -58,6 +58,12 @@ brightness (±30 dB level offset) and contrast (0.3–3×, the slope of the colo
 around its middle) set how strongly the image reads. Brightness and contrast are
 sonogram settings, so the sonogram page and the spectral view look alike.
 
+With CHANNELS set to L · R or M · S, the sonogram, spectral and 3D views show two
+lanes, one above the other: every sonogram column then carries the levels and the
+waveform extent of both signals, the editor's texture holds both lanes, and the 3D
+history rows hold both band sets, each drawn as its own scene with the same camera.
+Changing CHANNELS restarts the sonogram.
+
 ## Stereo
 
 Correlation, balance and mid and side levels are exponential averages over 0.3 s,
@@ -83,6 +89,12 @@ The time between the last two crossings gives the frequency readout.
 Spans longer than two samples per pixel are drawn as the extent of each pixel column;
 short spans as lines through the samples, with dots when they are far apart. Automatic
 gain falls at once and rises by 3 % per frame, like the stereo scope's.
+
+Spans above 500 ms do not fit the sample history. For them the worker records an
+envelope all the time: the minimum and maximum of mid, side, left and right per
+millisecond, 65 536 buckets (about 65 s). New buckets reach the editor like sonogram
+columns, and the oscilloscope draws them scrolling, newest on the right, without a
+trigger (ROLL).
 
 ## Loudness
 
@@ -115,11 +127,17 @@ their compact versions. Panel headers place legends, pills and readouts after th
 title and switch to shorter wordings, or leave a text out, when it would not fit; the
 loudness readouts use one column when two would collide.
 
-The color scheme sets the accent, the first trace (left, mid or a single signal), the
-second (right), side, the plot background and the grid; the heat map colors the
-sonogram, the spectral view and the 3D views. The Custom scheme and heat map store
-their colors with the settings. The editor puts the frame's colors into the egui
-context, where the plot helpers find them.
+Diagram colors live in `style.rs`: a `PlotStyle` with the background and grid shared by
+every diagram, and one style per view with the elements that view draws, for example
+`SpectrumStyle` (curves, fill, peak hold) or `LoudnessStyle` (lines and target colors).
+Colors are stored as RGB with an opacity where one applies; field names are persisted.
+A right click inside a view opens an egui area with that view's entries and the shared
+background and grid; it closes with Esc or a click elsewhere while no picker is open.
+The theme (`scheme` and its custom `accent`) only colors controls and panel marks. The
+sonogram and spectral views share their levels but keep one texture each, so each can
+use its own heat map; each texture uploads only the columns written since its last
+upload. The editor puts the shared background and grid into the egui context, where
+the plot helpers find them.
 
 ## Editor window
 

@@ -161,7 +161,14 @@ pub fn draw(
     }
     for cell in rows.iter().flatten() {
         let compact = cell.rect.width() < COMPACT_WIDTH || cell.rect.height() < COMPACT_HEIGHT;
-        draw_module(ui, cell.rect, cell.module, state, settings, colors, compact);
+        draw_module(
+            ui,
+            cell.rect,
+            cell.module,
+            state,
+            settings,
+            (colors, compact),
+        );
     }
     resize_handles(ui, &rows, area, &mut settings.overview, colors);
     move_handles(

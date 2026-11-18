@@ -27,7 +27,9 @@ use crate::analysis::spectrum::{
 };
 use crate::analysis::stereo::{StereoMeter, StereoReading};
 use crate::capture::StreamState;
-use crate::settings::{AnalyzerSettings, FftSize, HistorySpan, ScopeSamples, TimeSpan};
+use crate::settings::{
+    AnalyzerSettings, Choice, FftSize, HistorySpan, ScopeSamples, Signal, TimeSpan,
+};
 
 /// Pause between drains of the capture ring.
 const POLL_INTERVAL: Duration = Duration::from_millis(4);
@@ -40,6 +42,17 @@ pub const LOUDNESS_HISTORY_LEN: usize = (600.0 * LOUDNESS_HISTORY_RATE_HZ) as us
 
 /// One loudness history entry: momentary and short-term loudness in LUFS.
 pub type LoudnessPoint = [f32; 2];
+
+/// Duration of an envelope bucket in seconds.
+pub const ENVELOPE_BUCKET_S: f32 = 0.001;
+/// Envelope buckets kept, a little over a minute.
+pub const ENVELOPE_LEN: usize = 65_536;
+
+/// The minimum and maximum of each [`Signal`] over one envelope bucket, indexed by
+/// [`Choice::index`].
+pub type EnvelopeBucket = [[f32; 2]; 4];
+
+const EMPTY_BUCKET: EnvelopeBucket = [[f32::MAX, f32::MIN]; 4];
 
 /// Everything the editor draws.
 #[derive(Clone, Debug, Default)]
@@ -57,6 +70,10 @@ pub struct Published {
     pub loudness: LoudnessReading,
     /// Loudness every 100 ms, oldest first.
     pub loudness_history: VecDeque<LoudnessPoint>,
+    /// New oscilloscope envelope buckets, oldest first; the editor takes them.
+    pub envelope: VecDeque<EnvelopeBucket>,
+    /// Changes when earlier envelope buckets no longer fit, after a format change.
+    pub envelope_generation: u64,
     /// Frames the worker could not take in time.
     pub dropped_frames: u64,
     /// Changes with every update.
@@ -167,6 +184,9 @@ pub struct Engine {
     spectrum_dirty: bool,
     /// Frames published for the scopes.
     scope_frames: usize,
+    bucket: EnvelopeBucket,
+    bucket_frames: usize,
+    frames_per_bucket: usize,
     surface_dirty: bool,
 }
 
@@ -195,6 +215,9 @@ impl Engine {
             spectrum_dirty: true,
             surface_dirty: true,
             scope_frames: ScopeSamples::MAX,
+            bucket: EMPTY_BUCKET,
+            bucket_frames: 0,
+            frames_per_bucket: ((sample_rate as f32 * ENVELOPE_BUCKET_S).round() as usize).max(1),
         }
     }
 
@@ -225,6 +248,20 @@ impl Engine {
     /// Analyzes one frame; the FFT analyses only run when `view` is set.
     pub fn process(&mut self, frame: [f32; 2], view: bool) {
         self.history.push(frame);
+        for (signal, extent) in Signal::ALL.iter().zip(&mut self.bucket) {
+            let value = signal.of(frame);
+            extent[0] = extent[0].min(value);
+            extent[1] = extent[1].max(value);
+        }
+        self.bucket_frames += 1;
+        if self.bucket_frames >= self.frames_per_bucket {
+            if self.out.envelope.len() >= ENVELOPE_LEN {
+                self.out.envelope.pop_front();
+            }
+            self.out.envelope.push_back(self.bucket);
+            self.bucket = EMPTY_BUCKET;
+            self.bucket_frames = 0;
+        }
         self.stereo.process(frame);
         if self.loudness.process(frame) {
             self.loudness_blocks += 1;
@@ -274,6 +311,7 @@ impl Engine {
         published.sonogram.generation = feed.generation;
         published.sonogram.range_hz = feed.range_hz;
         published.sonogram.scale = feed.scale;
+        published.sonogram.lanes = feed.lanes;
         published.sonogram.columns.extend(feed.columns.drain(..));
         let excess = published
             .sonogram
@@ -296,6 +334,9 @@ impl Engine {
                 .clone_from(&self.out.loudness_history);
             self.loudness_blocks = 0;
         }
+        published.envelope.extend(self.out.envelope.drain(..));
+        let excess = published.envelope.len().saturating_sub(ENVELOPE_LEN);
+        published.envelope.drain(..excess);
         published.dropped_frames = dropped_frames;
         published.sequence += 1;
     }
@@ -363,7 +404,13 @@ fn run(shared: &AnalysisShared, mut consumer: Consumer<[f32; 2]>) {
         let settings = shared.settings();
         let engine = match &mut engine {
             Some(current) if current.format() == format => current,
-            slot => slot.insert(Engine::new(format.0, format.1, &settings)),
+            slot => {
+                shared.with_published(|published| {
+                    published.envelope.clear();
+                    published.envelope_generation += 1;
+                });
+                slot.insert(Engine::new(format.0, format.1, &settings))
+            }
         };
         engine.configure(&settings);
         if shared.reset_loudness.swap(false, Ordering::Relaxed) {

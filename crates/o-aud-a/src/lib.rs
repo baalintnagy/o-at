@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod capture;
 pub mod layout;
 pub mod settings;
+pub mod style;
 pub mod view;
 pub mod window;
 

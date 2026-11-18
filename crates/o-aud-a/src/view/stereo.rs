@@ -4,9 +4,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::{FRAC_PI_4, PI};
 
-use aud_ui::theme::{
-    ALERT, BORDER, METER_WARN, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke,
-};
+use aud_ui::theme::{BORDER, METER_WARN, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::{bar_meter, bipolar_meter, panel};
 use egui::{
     Align2, Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Shape, StrokeKind, Ui, pos2, vec2,
@@ -15,7 +13,8 @@ use egui::{
 use crate::analysis::Published;
 use crate::analysis::stereo::{STEREO_BANDS, stereo_band_hz};
 use crate::settings::{ScopeGain, ScopeMode, StereoSettings};
-use crate::view::colormap::Colors;
+use crate::style::StereoStyle;
+use crate::view::colormap::{Colors, rgb};
 use crate::view::plot::{format_hz, grid, grid_strong, plot_background};
 
 /// Scope frames kept as a fading trail.
@@ -50,7 +49,7 @@ pub fn draw(
     view: &mut StereoView,
     data: &Published,
     settings: &mut StereoSettings,
-    colors: &Colors,
+    (colors, style): (&Colors, &StereoStyle),
     compact: bool,
     frozen: bool,
 ) {
@@ -64,20 +63,20 @@ pub fn draw(
             pos2(content.center().x, content.top() + scope_side * 0.5),
             vec2(scope_side, scope_side),
         );
-        draw_scope(&painter, scope, view, data, (settings, colors), frozen);
+        draw_scope(&painter, scope, view, data, (settings, style), frozen);
         let meters = Rect::from_min_max(
             pos2(content.left(), content.bottom() - meters_height),
             content.max,
         );
-        draw_meters(ui, meters, data, colors, true);
+        draw_meters(ui, meters, data, style, true);
         return;
     }
     let scope_side = content.height().min(content.width() * 0.48);
     let scope = Rect::from_min_size(content.min, vec2(scope_side, scope_side));
-    draw_scope(&painter, scope, view, data, (settings, colors), frozen);
+    draw_scope(&painter, scope, view, data, (settings, style), frozen);
     let side = Rect::from_min_max(pos2(scope.right() + 20.0, content.top()), content.max);
     let meters = Rect::from_min_size(side.min, vec2(side.width(), 150.0));
-    draw_meters(ui, meters, data, colors, false);
+    draw_meters(ui, meters, data, style, false);
     let image = Rect::from_min_max(
         pos2(side.left() + 36.0, meters.bottom() + 34.0),
         pos2(side.right(), side.bottom() - 18.0),
@@ -92,11 +91,11 @@ pub fn draw(
     painter.text(
         pos2(side.right(), meters.bottom() + 16.0),
         Align2::RIGHT_CENTER,
-        "position · width · red: opposite phase",
+        "position · width · opposite phase",
         font(10.0),
         TEXT_FAINT,
     );
-    draw_band_image(&painter, image, data, colors);
+    draw_band_image(&painter, image, data, style);
 }
 
 /// Scope coordinates of a frame: side across, mid up, full scale on the diamond's edge.
@@ -109,7 +108,7 @@ fn draw_scope(
     rect: Rect,
     view: &mut StereoView,
     data: &Published,
-    (settings, colors): (&StereoSettings, &Colors),
+    (settings, style): (&StereoSettings, &StereoStyle),
     frozen: bool,
 ) {
     plot_background(painter, rect);
@@ -273,6 +272,8 @@ fn draw_scope(
 
     let clipped = painter.with_clip_rect(rect.shrink(1.0));
     let count = view.trail.len();
+    let scope_color = rgb(style.scope.color);
+    let scope_opacity = style.scope.opacity.clamp(0.0, 1.0);
     for (age, points) in view.trail.iter().enumerate() {
         let fade = (age + 1) as f32 / count.max(1) as f32;
         match settings.mode {
@@ -280,11 +281,11 @@ fn draw_scope(
                 let line: Vec<Pos2> = points.iter().map(|point| to_screen(*point)).collect();
                 clipped.add(Shape::line(
                     line,
-                    stroke(1.0, alpha(colors.primary, 0.55 * fade * fade)),
+                    stroke(1.0, alpha(scope_color, 0.75 * scope_opacity * fade * fade)),
                 ));
             }
             _ => {
-                let color = alpha(colors.primary, 0.75 * fade * fade);
+                let color = alpha(scope_color, scope_opacity * fade * fade);
                 let mut mesh = Mesh::default();
                 for point in points {
                     let position = to_screen(*point);
@@ -304,14 +305,14 @@ fn draw_scope(
     );
 }
 
-fn draw_meters(ui: &Ui, rect: Rect, data: &Published, colors: &Colors, compact: bool) {
+fn draw_meters(ui: &Ui, rect: Rect, data: &Published, style: &StereoStyle, compact: bool) {
     let stereo = &data.stereo;
     let correlation_color = if stereo.correlation < 0.0 {
-        ALERT
+        rgb(style.opposite)
     } else if stereo.correlation < 0.3 {
         METER_WARN
     } else {
-        colors.primary
+        rgb(style.mid)
     };
     let row = 36.0;
     bipolar_meter(
@@ -335,7 +336,7 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, colors: &Colors, compact: 
         Rect::from_min_size(rect.min + vec2(0.0, row), vec2(rect.width(), 22.0)),
         stereo.balance_db,
         12.0,
-        colors.secondary,
+        rgb(style.balance),
         "Balance",
         &balance,
     );
@@ -355,7 +356,7 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, colors: &Colors, compact: 
         Rect::from_min_size(rect.min + vec2(0.0, 2.0 * row), vec2(rect.width(), 22.0)),
         level(stereo.mid_db),
         None,
-        colors.primary,
+        rgb(style.mid),
         "Mid level (RMS)",
         &text(stereo.mid_db),
     );
@@ -364,7 +365,7 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, colors: &Colors, compact: 
         Rect::from_min_size(rect.min + vec2(0.0, 3.0 * row), vec2(rect.width(), 22.0)),
         level(stereo.side_db),
         None,
-        colors.side,
+        rgb(style.side),
         "Side level (RMS)",
         &text(stereo.side_db),
     );
@@ -385,7 +386,7 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, colors: &Colors, compact: 
     );
 }
 
-fn draw_band_image(painter: &Painter, rect: Rect, data: &Published, colors: &Colors) {
+fn draw_band_image(painter: &Painter, rect: Rect, data: &Published, style: &StereoStyle) {
     plot_background(painter, rect);
     let bands = &data.spectrum.bands;
     let row = rect.height() / STEREO_BANDS as f32;
@@ -423,9 +424,9 @@ fn draw_band_image(painter: &Painter, rect: Rect, data: &Published, colors: &Col
         let centre = rect.center().x + bands.pan[band] * rect.width() * 0.5;
         let half = spread * rect.width() * 0.5;
         let color = if correlation < 0.0 {
-            ALERT
+            rgb(style.opposite)
         } else {
-            colors.primary
+            rgb(style.bands.color)
         };
         painter.rect_filled(
             Rect::from_min_max(
@@ -433,7 +434,7 @@ fn draw_band_image(painter: &Painter, rect: Rect, data: &Published, colors: &Col
                 pos2((centre + half).min(rect.right()), y + row * 0.36),
             ),
             CornerRadius::same(2),
-            alpha(color, 0.25 + 0.6 * presence),
+            alpha(color, style.bands.opacity * (0.3 + 0.7 * presence)),
         );
         painter.circle_filled(pos2(centre, y), 2.0, alpha(Color32::WHITE, presence));
     }

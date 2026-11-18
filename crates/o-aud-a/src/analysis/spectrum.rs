@@ -215,12 +215,35 @@ impl Default for WaveExtent {
     }
 }
 
-/// One sonogram column with the waveform it covers.
+/// One sonogram column with the waveform it covers, for one or two lanes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SonogramColumn {
-    /// [`SONOGRAM_ROWS`] levels in dB, lowest frequency first.
+    /// [`SONOGRAM_ROWS`] levels in dB per lane, lowest frequency first, lane by lane.
     pub levels: Vec<f32>,
-    pub wave: WaveExtent,
+    pub wave: [WaveExtent; 2],
+}
+
+/// Waveform accumulated since the last column: minimum, maximum, sum of squares, frames.
+type WaveSum = (f32, f32, f64, u32);
+
+const EMPTY_WAVE: WaveSum = (f32::MAX, f32::MIN, 0.0, 0);
+
+fn add_to(sum: &mut WaveSum, value: f32) {
+    sum.0 = sum.0.min(value);
+    sum.1 = sum.1.max(value);
+    sum.2 += f64::from(value * value);
+    sum.3 += 1;
+}
+
+fn extent((min, max, squares, count): WaveSum) -> WaveExtent {
+    if count == 0 {
+        return WaveExtent::default();
+    }
+    WaveExtent {
+        min,
+        max,
+        rms: (squares / f64::from(count)).sqrt() as f32,
+    }
 }
 
 /// New sonogram columns, for the editor.
@@ -231,7 +254,9 @@ pub struct SonogramFeed {
     /// Shown frequency range in Hz.
     pub range_hz: (f32, f32),
     pub scale: FreqScale,
-    /// Changes whenever the rows map to other frequencies.
+    /// Lanes per column.
+    pub lanes: usize,
+    /// Changes whenever the rows map to other frequencies or the lanes change.
     pub generation: u64,
 }
 
@@ -243,8 +268,8 @@ pub struct SonogramStage {
     map: BandMap,
     range_hz: (f32, f32),
     generation: u64,
-    /// Waveform since the last column: minimum, maximum, sum of squares and frames.
-    wave: (f32, f32, f64, u32),
+    /// Waveform per lane since the last column.
+    wave: [WaveSum; 2],
 }
 
 impl SonogramStage {
@@ -256,7 +281,7 @@ impl SonogramStage {
             map: BandMap::default(),
             range_hz: (0.0, 0.0),
             generation: 0,
-            wave: (f32::MAX, f32::MIN, 0.0, 0),
+            wave: [EMPTY_WAVE; 2],
         };
         stage.remap();
         stage
@@ -264,12 +289,11 @@ impl SonogramStage {
 
     /// Records a frame for the next column's waveform extent.
     pub fn observe(&mut self, frame: [f32; 2]) {
-        let value = self.settings.signal.of(frame);
-        let (min, max, squares, count) = &mut self.wave;
-        *min = min.min(value);
-        *max = max.max(value);
-        *squares += f64::from(value * value);
-        *count += 1;
+        let (first, second) = self.settings.signals();
+        add_to(&mut self.wave[0], first.of(frame));
+        if let Some(second) = second {
+            add_to(&mut self.wave[1], second.of(frame));
+        }
     }
 
     /// Columns per second.
@@ -298,7 +322,8 @@ impl SonogramStage {
         let resized = self.tap.configure(settings.fft, Window::Hann);
         let remap = resized
             || settings.scale != self.settings.scale
-            || settings.limit != self.settings.limit;
+            || settings.limit != self.settings.limit
+            || settings.channels != self.settings.channels;
         self.settings = settings;
         if remap {
             self.remap();
@@ -313,22 +338,18 @@ impl SonogramStage {
         } else {
             SonogramColumn::default()
         };
-        column.levels.resize(SONOGRAM_ROWS, FLOOR_DB);
-        let signal = self.settings.signal;
-        self.map
-            .levels_db(|bin| self.tap.power(signal, bin), &mut column.levels);
-        let (min, max, squares, count) = self.wave;
-        column.wave = if count > 0 {
-            WaveExtent {
-                min,
-                max,
-                rms: (squares / f64::from(count)).sqrt() as f32,
-            }
-        } else {
-            WaveExtent::default()
-        };
-        self.wave = (f32::MAX, f32::MIN, 0.0, 0);
+        let lanes = self.settings.lanes();
+        column.levels.resize(SONOGRAM_ROWS * lanes, FLOOR_DB);
+        let (first, second) = self.settings.signals();
+        for (lane, signal) in [Some(first), second].into_iter().flatten().enumerate() {
+            let levels = &mut column.levels[lane * SONOGRAM_ROWS..(lane + 1) * SONOGRAM_ROWS];
+            self.map
+                .levels_db(|bin| self.tap.power(signal, bin), levels);
+        }
+        column.wave = self.wave.map(extent);
+        self.wave = [EMPTY_WAVE; 2];
         feed.columns.push_back(column);
+        feed.lanes = lanes;
         feed.range_hz = self.range_hz;
         feed.scale = self.settings.scale;
         if feed.generation != self.generation {
@@ -345,7 +366,9 @@ impl SonogramStage {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SurfaceFrame {
     pub bands: usize,
-    /// Spectrum rows of `bands` levels in dB, oldest first.
+    /// Lanes per row.
+    pub lanes: usize,
+    /// Spectrum rows of `bands` levels in dB per lane, lane by lane, oldest first.
     pub rows: VecDeque<Vec<f32>>,
     /// Stereogram levels in dB, `bands` rows of [`PAN_COLUMNS`] pan positions.
     pub stereo_db: Vec<f32>,
@@ -363,7 +386,6 @@ pub struct SurfaceStage {
     tap: FftTap,
     map: BandMap,
     range_hz: (f32, f32),
-    row: Vec<f32>,
     stereo_power: Vec<f32>,
     stereo_cross: Vec<f32>,
 }
@@ -377,7 +399,6 @@ impl SurfaceStage {
             tap: FftTap::new(fft.fft, Window::Hann),
             map: BandMap::default(),
             range_hz: (0.0, 0.0),
-            row: Vec::new(),
             stereo_power: Vec::new(),
             stereo_cross: Vec::new(),
         };
@@ -398,7 +419,6 @@ impl SurfaceStage {
             self.tap.bins(),
             self.sample_rate / self.tap.samples() as f32,
         );
-        self.row = vec![FLOOR_DB; bands];
         self.stereo_power = vec![0.0; bands * PAN_COLUMNS];
         self.stereo_cross = vec![0.0; bands * PAN_COLUMNS];
     }
@@ -417,19 +437,31 @@ impl SurfaceStage {
     pub fn tick(&mut self, history: &History, frame: &mut SurfaceFrame) {
         self.tap.analyze(history);
         let bands = self.settings.bands.count();
-        if frame.bands != bands || frame.range_hz != self.range_hz {
+        let lanes = self.fft.lanes();
+        if frame.bands != bands || frame.range_hz != self.range_hz || frame.lanes != lanes {
             frame.rows.clear();
             frame.bands = bands;
+            frame.lanes = lanes;
             frame.range_hz = self.range_hz;
         }
-        let signal = self.fft.signal;
-        self.map
-            .levels_db(|bin| self.tap.power(signal, bin), &mut self.row);
         let depth = self.settings.depth.count();
+        let mut row = if frame.rows.len() >= depth {
+            frame.rows.pop_front().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         while frame.rows.len() >= depth {
             frame.rows.pop_front();
         }
-        frame.rows.push_back(self.row.clone());
+        row.resize(bands * lanes, FLOOR_DB);
+        let (first, second) = self.fft.signals();
+        for (lane, signal) in [Some(first), second].into_iter().flatten().enumerate() {
+            self.map.levels_db(
+                |bin| self.tap.power(signal, bin),
+                &mut row[lane * bands..(lane + 1) * bands],
+            );
+        }
+        frame.rows.push_back(row);
 
         let decay = (-1.0 / (SURFACE_RATE_HZ * STEREOGRAM_TIME_S)).exp();
         self.stereo_power
@@ -474,9 +506,11 @@ impl SurfaceStage {
 mod tests {
     use std::f32::consts::TAU;
 
-    use super::{SonogramFeed, SonogramStage, SpectrumFrame, SpectrumStage, smooth};
+    use super::{SONOGRAM_ROWS, SonogramFeed, SonogramStage, SpectrumFrame, SpectrumStage, smooth};
     use crate::analysis::fft::History;
-    use crate::settings::{Averaging, ChannelMode, SonogramSettings, SpectrumSettings, Window};
+    use crate::settings::{
+        Averaging, ChannelMode, Lanes, SonogramSettings, SpectrumSettings, Window,
+    };
 
     fn sine_history(frequency: f32, rate: f32) -> History {
         let mut history = History::default();
@@ -522,6 +556,39 @@ mod tests {
     }
 
     #[test]
+    fn stereo_lanes_separate_the_channels() {
+        let rate = 48_000.0;
+        let mut history = History::default();
+        for n in 0..32_768 {
+            // A tone on the left only.
+            let value = (TAU * 1_000.0 * n as f32 / rate).sin();
+            history.push([value, 0.0]);
+        }
+        let settings = SonogramSettings {
+            channels: Lanes::LeftRight,
+            ..SonogramSettings::default()
+        };
+        let mut stage = SonogramStage::new(settings, rate);
+        let mut feed = SonogramFeed::default();
+        stage.observe([0.5, -0.25]);
+        stage.tick(&history, &mut feed);
+        let column = feed.columns.back().expect("a column");
+        assert_eq!(feed.lanes, 2);
+        assert_eq!(column.levels.len(), 2 * SONOGRAM_ROWS);
+        let loudest = |levels: &[f32]| levels.iter().copied().fold(f32::MIN, f32::max);
+        assert!(
+            loudest(&column.levels[..SONOGRAM_ROWS]) > -3.0,
+            "left has the tone"
+        );
+        assert!(
+            loudest(&column.levels[SONOGRAM_ROWS..]) < -100.0,
+            "right is silent"
+        );
+        assert_eq!(column.wave[0].max, 0.5);
+        assert_eq!(column.wave[1].min, -0.25);
+    }
+
+    #[test]
     fn sonogram_columns_peak_at_the_tone() {
         let rate = 48_000.0;
         let history = sine_history(1_000.0, rate);
@@ -531,7 +598,7 @@ mod tests {
             stage.observe([value, value]);
         }
         stage.tick(&history, &mut feed);
-        let wave = feed.columns.back().expect("a column").wave;
+        let wave = feed.columns.back().expect("a column").wave[0];
         assert_eq!((wave.min, wave.max), (-0.25, 0.5));
         assert!((wave.rms - (0.3125_f32 / 4.0).sqrt()).abs() < 1e-6);
         let column = &feed.columns.back().expect("a column").levels;

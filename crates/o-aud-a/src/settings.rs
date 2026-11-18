@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::layout::OverviewLayout;
+use crate::style::{PlotStyle, Rgb, ViewStyles};
 
 /// A setting with a fixed set of choices, shown as a segmented selector.
 pub trait Choice: Copy + PartialEq + 'static {
@@ -185,6 +186,16 @@ impl Signal {
             Self::Right => right,
         }
     }
+}
+
+choice! {
+    /// Lanes of the sonogram, spectral and 3D views: one signal, or left and right, or
+    /// mid and side, each in a lane of its own.
+    Lanes {
+        Single => "SINGLE",
+        LeftRight => "L · R",
+        MidSide => "M · S",
+    } default Single
 }
 
 choice! {
@@ -436,7 +447,7 @@ impl SurfaceDepth {
 choice! {
     /// Oscilloscope time span across the screen.
     TimeSpan {
-        Ms1 => "1",
+        Ms1 => "1ms",
         Ms2 => "2",
         Ms5 => "5",
         Ms10 => "10",
@@ -445,14 +456,28 @@ choice! {
         Ms100 => "100",
         Ms200 => "200",
         Ms500 => "500",
+        S1 => "1s",
+        S2 => "2s",
+        S5 => "5s",
+        S10 => "10s",
+        S30 => "30s",
+        S60 => "60s",
     } default Ms20
 }
 
 impl TimeSpan {
     /// Span in seconds.
     pub fn seconds(self) -> f32 {
-        const MS: [f32; 9] = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0];
+        const MS: [f32; 15] = [
+            1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1_000.0, 2_000.0, 5_000.0,
+            10_000.0, 30_000.0, 60_000.0,
+        ];
         MS[self.index()] / 1_000.0
+    }
+
+    /// Spans drawn from the envelope history, scrolling, instead of from samples.
+    pub fn is_roll(self) -> bool {
+        self.seconds() > 0.5
     }
 }
 
@@ -498,7 +523,8 @@ choice! {
 }
 
 choice! {
-    /// Trace and accent colors of every view.
+    /// The theme: accent of buttons, tabs, sliders and panel marks. Never colors a
+    /// diagram; CUSTOM uses the theme's own accent color.
     ColorScheme {
         Oat => "O-AT",
         Phosphor => "PHOSPHOR",
@@ -508,40 +534,6 @@ choice! {
         Contrast => "CONTRAST",
         Custom => "CUSTOM",
     } default Oat
-}
-
-/// An sRGB color.
-pub type Rgb = [u8; 3];
-
-/// The colors of the CUSTOM scheme and heat map.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CustomColors {
-    pub accent: Rgb,
-    /// First trace: left, mid or a single signal.
-    pub primary: Rgb,
-    /// Second trace: right.
-    pub secondary: Rgb,
-    pub side: Rgb,
-    /// Plot backgrounds.
-    pub plot: Rgb,
-    pub grid: Rgb,
-    /// Heat map from quiet through the middle to loud.
-    pub heat: [Rgb; 3],
-}
-
-impl Default for CustomColors {
-    fn default() -> Self {
-        Self {
-            accent: [0xc6, 0xe0, 0x5a],
-            primary: [0xc6, 0xe0, 0x5a],
-            secondary: [0x5c, 0xa8, 0xff],
-            side: [0xa4, 0x8b, 0xfa],
-            plot: [0x13, 0x15, 0x1a],
-            grid: [0x25, 0x2a, 0x34],
-            heat: [[0x0b, 0x0d, 0x12], [0xd9, 0x3f, 0x5b], [0xfc, 0xf3, 0xa6]],
-        }
-    }
 }
 
 choice! {
@@ -699,6 +691,8 @@ pub struct SonogramSettings {
     pub speed: Speed,
     pub range: DbRange,
     pub limit: FreqLimit,
+    /// One lane of `signal`, or two lanes.
+    pub channels: Lanes,
     /// Level offset of the image in dB: raises or lowers every level before coloring.
     pub brightness_db: f32,
     /// Steepness of the color scale around its middle; one is linear in dB.
@@ -719,6 +713,20 @@ impl SonogramSettings {
         taper: Taper::Linear,
     };
 
+    /// The signal of each lane: the first, and the second if there are two.
+    pub fn signals(&self) -> (Signal, Option<Signal>) {
+        match self.channels {
+            Lanes::Single => (self.signal, None),
+            Lanes::LeftRight => (Signal::Left, Some(Signal::Right)),
+            Lanes::MidSide => (Signal::Mid, Some(Signal::Side)),
+        }
+    }
+
+    /// Number of lanes.
+    pub fn lanes(&self) -> usize {
+        if self.channels == Lanes::Single { 1 } else { 2 }
+    }
+
     /// Position from 0 (quiet) to 1 (loud) of a level in dB on the color scale.
     pub fn tone(&self, db: f32) -> f32 {
         let range = self.range.db();
@@ -736,6 +744,7 @@ impl Default for SonogramSettings {
             speed: Speed::S60,
             range: DbRange::R90,
             limit: FreqLimit::Audible,
+            channels: Lanes::Single,
             brightness_db: 0.0,
             contrast: 1.0,
         }
@@ -809,10 +818,14 @@ impl Default for SurfaceSettings {
 #[serde(default)]
 pub struct AnalyzerSettings {
     pub tab: Tab,
+    /// The theme of the controls.
     pub scheme: ColorScheme,
-    pub colormap: ColorMap,
-    /// Colors of the CUSTOM scheme and heat map.
-    pub custom: CustomColors,
+    /// Accent of the CUSTOM theme.
+    pub accent: Rgb,
+    /// Background and grid of every diagram.
+    pub plot: PlotStyle,
+    /// Each view's diagram colors.
+    pub styles: ViewStyles,
     pub overview: OverviewLayout,
     pub spectral: SpectralSettings,
     pub spectrum: SpectrumSettings,

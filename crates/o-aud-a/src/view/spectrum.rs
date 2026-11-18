@@ -7,7 +7,8 @@ use egui::{Align2, Color32, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Ui, pos
 use crate::analysis::Published;
 use crate::analysis::fft::{BandMap, FLOOR_DB};
 use crate::settings::{ChannelMode, FreqLimit, FreqScale, SpectrumSettings};
-use crate::view::colormap::Colors;
+use crate::style::SpectrumStyle;
+use crate::view::colormap::{Colors, paint};
 use crate::view::plot::{
     FreqAxis, Header, format_db, format_hz_precise, freq_grid_vertical, level_grid, note_name,
     plot_background, sample_db, tooltip,
@@ -52,9 +53,14 @@ impl SpectrumView {
     }
 }
 
-/// Curve colors for a channel mode: primary and secondary.
-fn curve_colors(mode: ChannelMode, colors: &Colors) -> (Color32, Color32) {
-    (colors.primary, colors.second(mode == ChannelMode::MidSide))
+/// Curve colors for a channel mode: the first curve and the second.
+fn curve_colors(mode: ChannelMode, style: &SpectrumStyle) -> (Color32, Color32) {
+    let second = if mode == ChannelMode::MidSide {
+        style.side
+    } else {
+        style.right
+    };
+    (paint(style.first), paint(second))
 }
 
 fn curve_labels(mode: ChannelMode) -> (&'static str, Option<&'static str>) {
@@ -74,7 +80,7 @@ pub fn draw(
     view: &mut SpectrumView,
     data: &Published,
     settings: &mut SpectrumSettings,
-    colors: &Colors,
+    (colors, style): (&Colors, &SpectrumStyle),
     compact: bool,
 ) {
     panel(ui, rect, "SPECTRUM", colors.accent);
@@ -126,7 +132,7 @@ pub fn draw(
         spectrum.bin_hz,
         settings.slope.db_per_octave(),
     );
-    let (primary_color, secondary_color) = curve_colors(settings.channels, colors);
+    let (primary_color, secondary_color) = curve_colors(settings.channels, style);
     let y_of = |db: f32| {
         let fraction = ((db - floor) / (TOP_DB - floor)).clamp(0.0, 1.0);
         plot.bottom() - plot.height() * fraction
@@ -141,25 +147,21 @@ pub fn draw(
         }
     };
     let clipped = ui.painter_at(plot);
-    for (peaks, color) in [
-        (&spectrum.secondary_peak_db, secondary_color),
-        (&spectrum.primary_peak_db, primary_color),
-    ] {
+    let peak_color = paint(style.peak);
+    for peaks in [&spectrum.secondary_peak_db, &spectrum.primary_peak_db] {
         if !peaks.is_empty() {
             curve(view, peaks);
-            clipped.add(Shape::line(
-                view.points.clone(),
-                stroke(1.0, alpha(color, 0.45)),
-            ));
+            clipped.add(Shape::line(view.points.clone(), stroke(1.0, peak_color)));
         }
     }
+    let fill = style.fill.clamp(0.0, 1.0);
     if !spectrum.secondary_db.is_empty() {
         curve(view, &spectrum.secondary_db);
         fill_below(
             &clipped,
             &view.points,
             plot.bottom(),
-            alpha(secondary_color, 0.10),
+            fade(secondary_color, 0.6 * fill),
         );
         clipped.add(Shape::line(
             view.points.clone(),
@@ -171,7 +173,7 @@ pub fn draw(
         &clipped,
         &view.points,
         plot.bottom(),
-        alpha(primary_color, 0.16),
+        fade(primary_color, fill),
     );
     clipped.add(Shape::line(view.points.clone(), stroke(1.5, primary_color)));
 
@@ -235,6 +237,12 @@ pub fn draw(
 /// A level with the display slope, keeping silence silent.
 fn shown(db: f32, tilt: f32) -> f32 {
     if db <= FLOOR_DB + 1.0 { db } else { db + tilt }
+}
+
+/// `color` with its opacity scaled by `factor`.
+fn fade(color: Color32, factor: f32) -> Color32 {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, (f32::from(a) * factor).round() as u8)
 }
 
 /// Fills the area between a curve and `bottom`.

@@ -48,7 +48,7 @@ Insert O-AUD-A anywhere in a chain; it passes the audio through unchanged. Its p
 show a spectrum analyzer, a sonogram, a stereo imager, an oscilloscope, an EBU R 128
 loudness meter and 3D spectrum and stereo views; SPECTRAL overlays the waveform on the sonogram. OVERVIEW
 shows the views you switch on: drag a view's title to move it and the gaps between views
-to resize them. COLORS sets and edits the colors of all views. Drag the window's lower
+to resize them. Right-click any diagram to change its colors; THEME colors the controls. Drag the window's lower
 right corner to resize it, or click FULL SCREEN (F11) to take it full screen; RESTORE or
 Esc brings it back.
 
