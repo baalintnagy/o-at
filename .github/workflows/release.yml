@@ -78,9 +78,9 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           generate_release_notes: true
           body: |
-            Windows x64 builds of O-NEC, O-AUD-TX and O-AUD-RX (VST3 and CLAP) and the
-            standalone O-AUD-RX, O-AUD-TX and O-NEC applications. See INSTALL.txt in the
-            archive.
+            Windows x64 builds of O-NEC, O-AUD-TX, O-AUD-RX and O-AUD-A (VST3 and CLAP)
+            and the standalone O-AUD-RX, O-AUD-TX, O-AUD-A and O-NEC applications. See
+            INSTALL.txt in the archive.
 
             Distributed VST3 binaries include GPLv3-licensed VST3 bindings; see NOTICE.md.
           files: |

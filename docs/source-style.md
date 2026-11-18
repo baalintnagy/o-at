@@ -5,11 +5,12 @@ Run these commands from the repository root:
 ```bash
 cargo fmt --all
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone -- -D warnings
+cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone,o-aud-a/standalone -- -D warnings
 cargo test --release
 cargo test --test realtime
 cargo test --workspace --release
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
+cargo test -p o-aud-a
 ```
 
 The CI workflow runs the check commands and fails on any difference or warning.
@@ -41,6 +42,6 @@ These conventions are not enforced by the configured tools:
 - Importing items instead of writing fully qualified paths in expressions.
 - No glob imports, including in test modules.
 - Iterator adapters versus loops, following the guidance in [AGENTS.md](../AGENTS.md).
-- Real-time safety of code reachable from `Plugin::process`, `TxPort::process` and
-  `Receiver::process` beyond allocations, which debug builds detect at run time.
+- Real-time safety of code reachable from `Plugin::process`, `TxPort::process`,
+  `Receiver::process` and `Capture::push` beyond allocations, which debug builds detect at run time.
 - Units in names or doc comments.

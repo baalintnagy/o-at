@@ -23,6 +23,8 @@ BORDER = (0x3A, 0x40, 0x4D)
 SEND = (0xFF, 0x8A, 0x3D)
 RECEIVE = (0x3C, 0xD6, 0xC0)
 REMOVED = (0xFF, 0x5C, 0x7A)
+ANALYZE = (0xC6, 0xE0, 0x5A)
+SYNC = (0x5C, 0xA8, 0xFF)
 
 
 def background() -> Image.Image:
@@ -115,6 +117,34 @@ def cleanup() -> Image.Image:
     return Image.alpha_composite(icon, layer)
 
 
+def analyzer() -> Image.Image:
+    """O-AUD-A: spectrum bars under a level curve, from lime at low frequencies to blue
+    at high ones."""
+    icon = background()
+    layer = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    heights = [0.34, 0.52, 0.62, 0.48, 0.56, 0.4, 0.28]
+    left, right = CANVAS * 0.18, CANVAS * 0.82
+    bottom = CANVAS * 0.78
+    slot = (right - left) / len(heights)
+    bar = slot * 0.62
+    for index, height in enumerate(heights):
+        t = index / (len(heights) - 1)
+        color = tuple(round(a + (b - a) * t) for a, b in zip(ANALYZE, SYNC))
+        x = left + slot * index + (slot - bar) / 2
+        draw.rounded_rectangle(
+            [x, bottom - CANVAS * height, x + bar, bottom],
+            radius=bar * 0.3,
+            fill=with_alpha(color, 0.9),
+        )
+    peaks = [
+        (left + slot * (index + 0.5), bottom - CANVAS * (height + 0.07))
+        for index, height in enumerate(heights)
+    ]
+    stroke(draw, peaks, CANVAS * 0.03, (0xD6, 0xDB, 0xE4))
+    return Image.alpha_composite(icon, layer)
+
+
 def save(name: str, image: Image.Image) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     image.resize((256, 256), Image.LANCZOS).save(OUT / f"{name}.png")
@@ -131,6 +161,7 @@ def main() -> None:
     save("o-aud-tx", signal(SEND, facing_right=True))
     save("o-aud-rx", signal(RECEIVE, facing_right=False))
     save("o-nec", cleanup())
+    save("o-aud-a", analyzer())
 
 
 if __name__ == "__main__":

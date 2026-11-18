@@ -7,3 +7,6 @@ name = "O-AUD-TX"
 
 [o-aud-rx]
 name = "O-AUD-RX"
+
+[o-aud-a]
+name = "O-AUD-A"

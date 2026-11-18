@@ -6,6 +6,7 @@
 | --- | --- |
 | [O-NEC](#o-nec) | Voice cleanup: noise suppression, echo cancellation, voice gate and speech leveler. |
 | [O-AUD-TX and O-AUD-RX](#o-aud-tx-and-o-aud-rx) | Route audio between hosts, applications and devices through named buses. |
+| [O-AUD-A](#o-aud-a) | Audio analyzer: spectrum, sonogram, stereo imager, oscilloscope, loudness meter and 3D views. |
 
 The tools are listed under the vendor `o-at` in plugin hosts. O-NEC, O-AUD-TX and
 O-AUD-RX replace the earlier ONEC, AUD-TX and AUD-RX plugins. Their plugin IDs are new
@@ -143,10 +144,11 @@ On Linux, building the editor needs X11, XCB and OpenGL development packages.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone -- -D warnings
+cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone,o-aud-a/standalone -- -D warnings
 cargo test --release
 cargo test --test realtime
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
+cargo test -p o-aud-a
 ```
 
 The tests cover echo canceller convergence (over 25 dB ERLE) and near-end
@@ -232,6 +234,51 @@ transmitter and receivers must run on the same computer and, on Windows, in the 
 user session; a transmitter whose clock is more than 0.5 % off cannot be followed
 without dropouts. See [Audio bus design](docs/audio-bus.md).
 
+## O-AUD-A
+
+**O-AUD-A** (VST3, CLAP and a standalone application) is an audio analyzer. Insert it
+anywhere; it passes the audio through unchanged and reports no latency. Resize the
+editor from its lower right corner. **FULL SCREEN** (or F11) takes the plugin window
+full screen on Windows, without its frame; **RESTORE** or Esc brings it back. Hosts
+cannot resize NIH-plug editors from their own window frame, so these are the ways to
+change its size. Its pages, in this order, show:
+
+| Page | What it shows | Options |
+| --- | --- | --- |
+| Overview | Any of the views at once, arranged as you like: switch each one on or off, drag a view's title onto another to move it beside, above or below it, and drag the gaps to resize. | Seven views, up to four rows; reset layout |
+| Spectral | Two layers: the sonogram, and on top of it the waveform of the same signal, aligned column by column (peak extent and RMS core), as in spectral editors. | Sonogram layer: opacity, brightness, contrast; waveform layer: opacity, gain (vertical zoom), linear or dB scale; and the sonogram options. The opacity sliders are logarithmic. |
+| Spectrum | Spectrum of left and right, mid and side, or one signal, with peak hold and a hover readout of frequency, note and level. | FFT 1K–32K, Hann, Blackman-Harris or flat-top window, averaging (off to infinite), 1/24–1/3 octave smoothing, 0/3/4.5 dB/oct slope, 60–120 dB range, 20 kHz or Nyquist, log, linear or semitone (ST) frequency scale |
+| Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, mid, side, left or right, log, linear or semitone (ST) frequency, 15–240 columns/s, range |
+| Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1–500 ms span; L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
+| Stereo | Goniometer, correlation and balance, mid and side levels, and the stereo position and width of 30 third-octave bands (red where they are out of phase). | Lissajous lines or dots, polar sample cloud or L/R scope; 512–4096 samples; automatic or fixed gain |
+| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; reset |
+| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, wheel to zoom. | 64–256 bands, 32–128 rows, range, FFT, color maps |
+
+**COLORS** sets the palette of every view: O-AT, Phosphor, Sunset, Ocean, Mono,
+Contrast (Okabe-Ito colors for color vision deficiencies) or Custom. Every color can be
+edited with a color picker: the accent, the left/mid, right and side traces, the plot
+background and the grid lines; editing one starts a Custom palette from the current one.
+The heat map of the sonogram, spectral and 3D views is one of four built-in maps or a
+custom map from three colors (quiet, middle, loud). The sonogram's **BRIGHTNESS** and
+**CONTRAST** tune how its levels map to the heat map. The settings, the layout and the selected page
+are stored with the session. **FREEZE** holds the
+display while the measurements continue.
+
+The audio thread only copies samples into a lock-free ring. A worker thread measures
+them: loudness and stereo meters all the time, so integrated loudness keeps counting
+while the editor is closed, and the FFT views only while the editor is open. See
+[Analyzer design](docs/o-aud-a.md).
+
+```bash
+cargo xtask bundle o-aud-a --release
+```
+
+```bash
+cargo run --release -p o-aud-a --features standalone --bin o-aud-a-standalone -- --backend wasapi
+```
+
+The standalone application analyzes an input device and outputs silence.
+
 ## Built on
 
 - [NIH-plug](https://github.com/robbert-vdh/nih-plug) for the VST3/CLAP wrappers and
@@ -268,7 +315,7 @@ Speex (Valin, 2007) and is implemented here on top of realfft.
 
 Pushing a tag `vX.Y.Z` that matches the version in `Cargo.toml` runs the
 [release workflow](.github/workflows/release.yml): it runs every CI check, builds the
-VST3 and CLAP bundles and the three applications, and publishes a GitHub release with
+VST3 and CLAP bundles and the four applications, and publishes a GitHub release with
 `O-AT-X.Y.Z-windows-x64.zip` (installation notes in
 [INSTALL.txt](packaging/INSTALL.txt)) and its SHA-256 checksum. The workflow can also be
 started by hand with a version.

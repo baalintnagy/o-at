@@ -8,9 +8,9 @@ under the [MIT License](LICENSE). Third-party materials retain their own license
 ## Distributed plugin binaries
 
 The VST3 export of NIH-plug uses the `vst3-sys` bindings, which are licensed under
-the GNU General Public License version 3. Distributed `O-NEC.vst3`, `O-AUD-TX.vst3` and
-`O-AUD-RX.vst3` binaries, and the NIH-plug standalone builds, are therefore combined
-works under GPLv3 terms. The CLAP binaries and the O-AUD-RX application do not include
+the GNU General Public License version 3. Distributed `O-NEC.vst3`, `O-AUD-TX.vst3`,
+`O-AUD-RX.vst3` and `O-AUD-A.vst3` binaries, and the NIH-plug standalone builds, are
+therefore combined works under GPLv3 terms. The CLAP binaries and the O-AUD-RX application do not include
 those bindings. This does not change the MIT license of the repository's own source
 code.
 
@@ -23,7 +23,7 @@ code.
 | nnnoiseless, including the RNNoise model weights | BSD-3-Clause |
 | DeepFilterNet (libDF `deep_filter`), including the DeepFilterNet3 model weights | MIT or Apache-2.0 |
 | tract (ONNX inference used by libDF), ndarray, rtrb | MIT or Apache-2.0 |
-| egui, baseview, RustFFT, rubato, audioadapter, biquad | MIT or Apache-2.0 |
+| egui, baseview, RustFFT, rubato, audioadapter, biquad, serde | MIT or Apache-2.0 |
 | egui-baseview, realfft | MIT |
 | assert_no_alloc (debug allocation checks) | BSD-1-Clause |
 | triple_buffer | MPL-2.0 |

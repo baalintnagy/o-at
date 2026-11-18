@@ -1,0 +1,46 @@
+[package]
+name = "o-aud-a"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["baalintnagy"]
+license = "MIT"
+description = "O-AUD-A: audio analyzer with spectrum, sonogram, stereo, loudness and 3D views"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "o-aud-a-standalone"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+# Standalone application that analyzes an audio input device without a host.
+standalone = ["nih_plug/standalone"]
+
+[dependencies]
+aud-ui = { path = "../aud-ui", features = ["nih-plug"] }
+# Same revisions as nih_plug_egui; the editor window is O-AUD-A's own, so it can resize
+# itself (see src/window.rs).
+baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0" }
+egui = { version = "0.31", default-features = false }
+egui-baseview = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "ec70c3fe6b2f070dcacbc22924431edbe24bd1c0" }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"] }
+# The version baseview uses.
+raw-window-handle = "0.5"
+realfft = "3.5"
+rtrb = "0.3"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+# Embeds the icon and version information in Windows executables.
+winresource = "0.1"
+
+[dev-dependencies]
+serde_json = "1"
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }

@@ -22,6 +22,8 @@ pub const RECEIVE: Color32 = Color32::from_rgb(0x3c, 0xd6, 0xc0);
 pub const BUS: Color32 = Color32::from_rgb(0xa4, 0x8b, 0xfa);
 /// Clock synchronization.
 pub const SYNC: Color32 = Color32::from_rgb(0x5c, 0xa8, 0xff);
+/// Measuring: O-AUD-A accents.
+pub const ANALYZE: Color32 = Color32::from_rgb(0xc6, 0xe0, 0x5a);
 /// Problems: dropouts, name conflicts.
 pub const ALERT: Color32 = Color32::from_rgb(0xff, 0x5c, 0x7a);
 /// Neutral signal levels.

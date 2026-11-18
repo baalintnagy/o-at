@@ -2132,8 +2132,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "o-aud-a"
+version = "0.4.0"
+dependencies = [
+ "assert_no_alloc",
+ "aud-ui",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
+ "egui",
+ "egui-baseview",
+ "nih_plug",
+ "raw-window-handle 0.5.2",
+ "realfft",
+ "rtrb 0.3.6",
+ "serde",
+ "serde_json",
+ "windows-sys 0.59.0",
+ "winresource",
+]
+
+[[package]]
 name = "o-aud-rx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2146,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2160,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-tx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2174,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "o-nec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",

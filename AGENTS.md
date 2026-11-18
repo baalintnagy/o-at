@@ -61,11 +61,23 @@ after changing these paths, and extend the allocation tests for new processing m
 The shared memory layouts in `audbus::layout` are a protocol between separately built
 binaries. Never change them without raising `PROTOCOL_VERSION`.
 
-All editors, O-NEC's included, take their palette and controls from `aud-ui`; O-NEC keeps
-only its signal colors in `src/editor/colors.rs`. Controls use the `Control` and
+All editors, O-NEC's and O-AUD-A's included, take their palette and controls from
+`aud-ui`; O-NEC keeps only its signal colors in `src/editor/colors.rs`. Controls use the `Control` and
 `Switch` abstractions, bound to parameters with `aud_ui::param`, so the O-AUD-RX editor
 body serves the plugin and the application. Keep plugin-specific code out of
 `o-aud-rx`'s core modules; the `plugin` and `view` features gate NIH-plug and egui.
+
+# Audio analyzer
+
+O-AUD-A lives in `crates/o-aud-a`; see [docs/o-aud-a.md](docs/o-aud-a.md). Its
+`Plugin::process` only calls `Capture::push`, which copies the input into an `rtrb`
+ring and must stay real-time safe. All measurements run on the analysis worker, which
+may allocate; the editor reads its results through a mutex that the audio thread never
+takes. Run `cargo test -p o-aud-a` (a debug build, with allocation checks) after
+changing the capture path. Its settings are persisted by serde variant and field names
+under `#[persist = "settings"]`: never rename them. O-AUD-A opens its own editor
+window (`crates/o-aud-a/src/window.rs`) so it can resize itself; keep it in step with
+`nih_plug_egui` when updating NIH-plug.
 
 # Latency contract
 
@@ -74,14 +86,14 @@ supported rate. Every processing stage keeps a constant delay, also when it is
 disabled. Only the noise model choice changes the delay; the plugin reports the new
 latency when it changes. When changing a stage's delay, update its delay constant and
 keep `reported_latency_matches_impulse_delay` passing for both noise models.
-O-AUD-TX adds no delay and O-AUD-RX reports none: its buffering belongs to an external
-stream that a host cannot compensate.
+O-AUD-TX and O-AUD-A add no delay and O-AUD-RX reports none: its buffering belongs to
+an external stream that a host cannot compensate.
 
 # Parameter compatibility
 
 Parameter IDs (`#[id = "..."]`) and `#[persist]` keys are stored in host sessions
-and presets, for O-NEC, O-AUD-TX and O-AUD-RX alike. Never rename or reuse them. Add new
-parameters with new IDs. The VST3 class IDs and CLAP IDs are equally permanent.
+and presets, for O-NEC, O-AUD-TX, O-AUD-RX and O-AUD-A alike. Never rename or reuse
+them. Add new parameters with new IDs. The VST3 class IDs and CLAP IDs are equally permanent.
 
 # Dependencies
 

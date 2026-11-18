@@ -1,13 +1,14 @@
-O-NEC, O-AUD-TX and O-AUD-RX for Windows (x64)
-==============================================
+O-NEC, O-AUD-TX, O-AUD-RX and O-AUD-A for Windows (x64)
+=======================================================
 
 Contents
 --------
-VST3\O-NEC.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3    VST3 plugins
-CLAP\O-NEC.clap, O-AUD-TX.clap, O-AUD-RX.clap    CLAP plugins
-O-AUD-RX.exe                                     Plays a bus on any output device
-O-AUD-TX-standalone.exe                          Sends an audio input device to a bus
-O-NEC-standalone.exe                             O-NEC without a plugin host
+VST3\O-NEC.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3, O-AUD-A.vst3    VST3 plugins
+CLAP\O-NEC.clap, O-AUD-TX.clap, O-AUD-RX.clap, O-AUD-A.clap    CLAP plugins
+O-AUD-RX.exe                    Plays a bus on any output device
+O-AUD-TX-standalone.exe         Sends an audio input device to a bus
+O-AUD-A-standalone.exe          Analyzes an audio input device
+O-NEC-standalone.exe            O-NEC without a plugin host
 
 Install the plugins
 -------------------
@@ -40,6 +41,19 @@ and accepts --bus NAME and --device NAME.
 O-AUD-TX-standalone.exe: run it with --backend wasapi (see --help for devices and rates).
 It plays its input to its output while sending; use headphones or switch THRU TO TRACK
 off to avoid feedback.
+
+Analyze audio
+-------------
+Insert O-AUD-A anywhere in a chain; it passes the audio through unchanged. Its pages
+show a spectrum analyzer, a sonogram, a stereo imager, an oscilloscope, an EBU R 128
+loudness meter and 3D spectrum and stereo views; SPECTRAL overlays the waveform on the sonogram. OVERVIEW
+shows the views you switch on: drag a view's title to move it and the gaps between views
+to resize them. COLORS sets and edits the colors of all views. Drag the window's lower
+right corner to resize it, or click FULL SCREEN (F11) to take it full screen; RESTORE or
+Esc brings it back.
+
+O-AUD-A-standalone.exe analyzes an input device and plays nothing back: run it with
+--backend wasapi (see --help for devices and rates).
 
 Licenses
 --------
