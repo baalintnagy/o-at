@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The release workflow runs this workflow and publishes its artifact.
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone -- -D warnings
+      - name: Test
+        run: cargo test --workspace --release
+      - name: Real-time allocation check (debug build)
+        run: cargo test --test realtime
+      - name: Audio bus tests with allocation checks (debug build)
+        run: cargo test -p audbus -p o-aud-tx -p o-aud-rx
+      - name: Bundle plugins
+        run: |
+          cargo xtask bundle o-nec --release
+          cargo xtask bundle o-aud-tx --release
+          cargo xtask bundle o-aud-rx --release
+      - name: Build applications
+        run: |
+          cargo build --release -p o-aud-rx-app
+          cargo build --release -p o-aud-tx --features standalone --bin o-aud-tx-standalone
+          cargo build --release --features standalone --bin o-nec-standalone
+          Copy-Item target/release/o-aud-rx.exe target/bundled/O-AUD-RX.exe
+          Copy-Item target/release/o-aud-tx-standalone.exe target/bundled/O-AUD-TX-standalone.exe
+          Copy-Item target/release/o-nec-standalone.exe target/bundled/O-NEC-standalone.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: o-at-windows-x64
+          path: target/bundled/
+          if-no-files-found: error

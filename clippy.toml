@@ -1,0 +1,2 @@
+# Keep in sync with AGENTS.md and docs/source-style.md.
+too-many-arguments-threshold = 8

@@ -1,0 +1,36 @@
+[package]
+name = "o-aud-tx"
+version = "0.1.2"
+edition = "2024"
+rust-version = "1.85"
+authors = ["baalintnagy"]
+license = "MIT"
+description = "O-AUD-TX: sends a track's audio to a named audio bus"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "o-aud-tx-standalone"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+# Standalone application for sending an audio input to a bus without a host.
+standalone = ["nih_plug/standalone"]
+
+[dependencies]
+audbus = { path = "../audbus" }
+aud-ui = { path = "../aud-ui", features = ["nih-plug"] }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"] }
+egui = { version = "0.31", default-features = false }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101" }
+
+[build-dependencies]
+# Embeds the icon and version information in Windows executables.
+winresource = "0.1"
+
+[dev-dependencies]
+cpal = "0.15"
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }

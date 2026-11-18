@@ -1,0 +1,9 @@
+# Bundle names used by `cargo xtask bundle`.
+[o-nec]
+name = "O-NEC"
+
+[o-aud-tx]
+name = "O-AUD-TX"
+
+[o-aud-rx]
+name = "O-AUD-RX"

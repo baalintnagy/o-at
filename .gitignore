@@ -1,0 +1,10 @@
+target/
+.runtime/
+*.vst3
+*.clap
+
+### IDEs ###
+.idea
+.vscode/*
+!.vscode/README.md
+*.iml

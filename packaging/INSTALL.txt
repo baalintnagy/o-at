@@ -1,0 +1,47 @@
+O-NEC, O-AUD-TX and O-AUD-RX for Windows (x64)
+==============================================
+
+Contents
+--------
+VST3\O-NEC.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3    VST3 plugins
+CLAP\O-NEC.clap, O-AUD-TX.clap, O-AUD-RX.clap    CLAP plugins
+O-AUD-RX.exe                                     Plays a bus on any output device
+O-AUD-TX-standalone.exe                          Sends an audio input device to a bus
+O-NEC-standalone.exe                             O-NEC without a plugin host
+
+Install the plugins
+-------------------
+1. Copy the folders in VST3 to C:\Program Files\Common Files\VST3
+   (CLAP hosts: copy the files in CLAP to C:\Program Files\Common Files\CLAP).
+   Both locations need administrator rights.
+2. Rescan plugins in your host. They are listed under the vendor "o-at".
+
+O-NEC, O-AUD-TX and O-AUD-RX replace the earlier ONEC, AUD-TX and AUD-RX. They have
+new plugin IDs, so hosts list them as new plugins: replace the earlier ones in your
+sessions, then delete ONEC.vst3, AUD-TX.vst3, AUD-RX.vst3 and ONEC.clap.
+
+The applications need no installation; run them from any folder.
+
+Route audio between hosts and devices
+-------------------------------------
+1. Insert O-AUD-TX where audio should leave a host. It names its bus Bus 1, Bus 2 and
+   so on; type another name, or click EDIT if the host keeps your keystrokes
+   (for example Ableton Live).
+2. Play the bus with the O-AUD-RX plugin in any host, or with O-AUD-RX.exe on any output
+   device: pick the bus from the list or enter its name.
+3. Raise Latency in O-AUD-RX if its Dropouts counter keeps rising.
+
+Senders and receivers must run on the same computer, as the same Windows user and at
+the same permission level.
+
+O-AUD-RX.exe remembers its bus, device and settings in %APPDATA%\O-AUD-RX\settings.ini
+and accepts --bus NAME and --device NAME.
+
+O-AUD-TX-standalone.exe: run it with --backend wasapi (see --help for devices and rates).
+It plays its input to its output while sending; use headphones or switch THRU TO TRACK
+off to avoid feedback.
+
+Licenses
+--------
+The source code is MIT licensed (LICENSE). The VST3 plugins and the NIH-plug
+standalone applications include GPLv3-licensed VST3 bindings; see NOTICE.md.

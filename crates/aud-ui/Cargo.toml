@@ -1,0 +1,28 @@
+[package]
+name = "aud-ui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["baalintnagy"]
+license = "MIT"
+description = "Shared egui theme and controls of the O-AUD-TX and O-AUD-RX editors"
+publish = false
+
+[features]
+# Adapters that bind the controls to NIH-plug parameters.
+nih-plug = ["dep:nih_plug"]
+
+[dependencies]
+# Same revisions as nih_plug_egui, for the separate name window.
+baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "9a0b42c09d712777b2edb4c5e0cb6baf21e988f0" }
+egui = { version = "0.31", default-features = false }
+egui-baseview = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "ec70c3fe6b2f070dcacbc22924431edbe24bd1c0", features = ["windows_keyboard_workaround"] }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }
