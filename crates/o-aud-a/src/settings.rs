@@ -636,11 +636,14 @@ impl Range {
     }
 }
 
-/// Spectral view settings: the sonogram layer and the waveform layer on top of it. The
-/// sonogram settings, brightness and contrast included, apply too.
+/// Spectral view settings: the sonogram layer and the waveform layer on top of it.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpectralSettings {
+    /// The sonogram layer's own analysis and tone, independent of the sonogram view.
+    /// `None` until set: earlier versions shared the sonogram's settings, and
+    /// [`AnalyzerSettings::upgrade`] starts from a copy of them.
+    pub sonogram: Option<SonogramSettings>,
     pub scale: WaveScale,
     /// Opacity of the sonogram layer, 0..1.
     pub sonogram_opacity: f32,
@@ -668,6 +671,7 @@ impl SpectralSettings {
 impl Default for SpectralSettings {
     fn default() -> Self {
         Self {
+            sonogram: None,
             scale: WaveScale::default(),
             sonogram_opacity: 1.0,
             waveform_opacity: 0.85,
@@ -870,6 +874,8 @@ pub struct SurfaceSettings {
     pub pitch_deg: f32,
     /// Camera zoom factor; one fits the scene.
     pub zoom: f32,
+    /// Draws a grid on the floor and the back walls of the scene.
+    pub grid: bool,
     /// Horizontal shift of the scene as a fraction of the view's width, right positive.
     pub pan_x: f32,
     /// Vertical shift of the scene as a fraction of the view's height, down positive.
@@ -909,6 +915,7 @@ impl Default for SurfaceSettings {
             yaw_deg: Self::DEFAULT_YAW_DEG,
             pitch_deg: Self::DEFAULT_PITCH_DEG,
             zoom: Self::ZOOM.default,
+            grid: false,
             pan_x: 0.0,
             pan_y: 0.0,
         }
@@ -938,6 +945,21 @@ pub struct AnalyzerSettings {
     pub surface: SurfaceSettings,
 }
 
+impl AnalyzerSettings {
+    /// Brings settings of earlier versions up to date.
+    pub fn upgrade(&mut self) {
+        self.stereo.upgrade();
+        if self.spectral.sonogram.is_none() {
+            self.spectral.sonogram = Some(self.sonogram);
+        }
+    }
+
+    /// The spectral view's sonogram layer settings.
+    pub fn spectral_sonogram(&self) -> SonogramSettings {
+        self.spectral.sonogram.unwrap_or(self.sonogram)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -958,9 +980,16 @@ mod tests {
         assert_eq!(settings.spectrum.slope, 4.5);
         assert_eq!(settings.sonogram.range, 60.0);
         assert_eq!(settings.surface.range, 90.0);
-        settings.stereo.upgrade();
+        assert_eq!(
+            settings.spectral_sonogram(),
+            settings.sonogram,
+            "the spectral view keeps the sonogram settings it shared"
+        );
+        settings.upgrade();
         assert_eq!(settings.stereo.mode, ScopeMode::Dots);
         assert!(settings.stereo.lines);
+        assert_eq!(settings.spectral.sonogram, Some(settings.sonogram));
+        assert!(!settings.surface.grid);
 
         settings.spectrum.range = 75.0;
         settings.spectrum.slope = 1.5;

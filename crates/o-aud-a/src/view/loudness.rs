@@ -1,13 +1,10 @@
 //! The loudness meter: EBU R 128 readouts, bar meters and the loudness history.
 
 use aud_ui::theme::{
-    ALERT, BORDER, METER_WARN, PANEL_RAISED, TEXT, TEXT_DIM, TEXT_FAINT, TRACK, alpha, font, mono,
-    stroke,
+    ALERT, BORDER, METER_WARN, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke,
 };
 use aud_ui::widgets::{button, panel};
-use egui::{
-    Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Shape, StrokeKind, Ui, pos2, vec2,
-};
+use egui::{Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Shape, Ui, pos2, vec2};
 
 use crate::analysis::loudness::LoudnessReading;
 use crate::analysis::{Published, history_entries};
@@ -409,13 +406,24 @@ fn draw_bars(
     let target = settings.target.lufs();
     let (floor, top) = (target - BELOW_TARGET_LU, target + ABOVE_TARGET_LU);
     let scale_width = 30.0;
-    let bars = Rect::from_min_max(
-        pos2(rect.left() + scale_width, rect.top() + 4.0),
+    // The meters stand in a diagram with the shared background and grid.
+    let diagram = Rect::from_min_max(
+        pos2(rect.left() + scale_width, rect.top()),
         pos2(rect.right(), rect.bottom() - 16.0),
     );
+    plot_background(painter, diagram);
+    let bars = diagram.shrink2(vec2(8.0, 6.0));
     let y_of = |lufs: f32| {
         bars.bottom() - bars.height() * ((lufs - floor) / (top - floor)).clamp(0.0, 1.0)
     };
+    painter.rect_filled(
+        Rect::from_x_y_ranges(
+            diagram.shrink(1.0).x_range(),
+            y_of(target + TOLERANCE_LU)..=y_of(target - TOLERANCE_LU),
+        ),
+        CornerRadius::ZERO,
+        alpha(rgb(style.on_target), 0.08),
+    );
     let mut lu = -36;
     while lu <= 9 {
         let lufs = target + lu as f32;
@@ -425,13 +433,13 @@ fn draw_bars(
             LoudnessScale::Relative => format!("{lu:+}"),
         };
         painter.text(
-            pos2(bars.left() - 5.0, y),
+            pos2(diagram.left() - 5.0, y),
             Align2::RIGHT_CENTER,
             label,
             mono(9.0),
             TEXT_FAINT,
         );
-        painter.hline(bars.x_range(), y, stroke(1.0, grid(painter)));
+        painter.hline(diagram.shrink(1.0).x_range(), y, stroke(1.0, grid(painter)));
         lu += 3;
     }
     let values = [
@@ -447,18 +455,19 @@ fn draw_bars(
         ),
         ("I", reading.integrated_lufs, None),
     ];
-    let gap = 8.0;
+    let gap = (bars.width() * 0.08).clamp(6.0, 16.0);
     let width = (bars.width() - gap * 2.0) / 3.0;
+    let track = alpha(grid(painter), 0.45);
     for (index, (label, value, max)) in values.into_iter().enumerate() {
         let left = bars.left() + index as f32 * (width + gap);
         let bar = Rect::from_min_max(pos2(left, bars.top()), pos2(left + width, bars.bottom()));
-        painter.rect_filled(bar, CornerRadius::same(2), alpha(TRACK, 0.8));
+        painter.rect_filled(bar, CornerRadius::same(3), track);
         if value.is_finite() {
-            painter.rect_filled(
-                Rect::from_min_max(pos2(bar.left(), y_of(value)), bar.right_bottom()),
-                CornerRadius::same(2),
-                target_color(value, target, style),
-            );
+            let color = target_color(value, target, style);
+            let fill = Rect::from_min_max(pos2(bar.left(), y_of(value)), bar.right_bottom());
+            painter.rect_filled(fill, CornerRadius::same(3), alpha(color, 0.85));
+            // A brighter cap marks the level.
+            painter.hline(fill.x_range(), fill.top() + 1.0, stroke(2.0, color));
         }
         if let Some(max) = max.filter(|max| max.is_finite()) {
             painter.hline(bar.x_range(), y_of(max), stroke(1.5, TEXT));
@@ -474,8 +483,8 @@ fn draw_bars(
     let target_y = y_of(target);
     painter.add(Shape::dashed_line(
         &[
-            pos2(bars.left() - 2.0, target_y),
-            pos2(bars.right() + 2.0, target_y),
+            pos2(diagram.left() + 2.0, target_y),
+            pos2(diagram.right() - 2.0, target_y),
         ],
         stroke(1.5, alpha(TEXT, 0.9)),
         4.0,
@@ -612,13 +621,7 @@ fn draw_true_peaks(
             TEXT_DIM,
         );
         let bar = Rect::from_min_max(pos2(bar_left, y - 4.0), pos2(bar_right, y + 4.0));
-        painter.rect(
-            bar,
-            CornerRadius::same(2),
-            PANEL_RAISED,
-            stroke(1.0, BORDER),
-            StrokeKind::Inside,
-        );
+        plot_background(painter, bar);
         let level = reading.true_peak_db[channel];
         if level.is_finite() {
             let color = if level > TRUE_PEAK_LIMIT_DB {

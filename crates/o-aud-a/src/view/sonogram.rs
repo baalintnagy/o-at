@@ -11,7 +11,7 @@ use egui::{
 
 use crate::analysis::Published;
 use crate::analysis::fft::FLOOR_DB;
-use crate::analysis::spectrum::{SONOGRAM_ROWS, WaveExtent};
+use crate::analysis::spectrum::{SONOGRAM_ROWS, SonogramFeed, WaveExtent};
 use crate::settings::{Choice, Signal, SonogramSettings, SpectralSettings, WaveScale};
 use crate::style::{HeatStyle, SonogramStyle, SpectralStyle};
 use crate::view::colormap::{Colors, Palette, lighten, rgb};
@@ -29,7 +29,7 @@ const LANE_GAP: f32 = 6.0;
 /// Lowest level of the waveform's dB scale, at the centre line.
 const WAVE_FLOOR_DB: f32 = -60.0;
 
-/// One colored image of the levels, for one view with its own heat map.
+/// The colored image of the levels.
 #[derive(Default)]
 struct Image {
     palette: Palette,
@@ -43,14 +43,8 @@ struct Image {
     stale: bool,
 }
 
-/// Which image a view draws: the sonogram's or the spectral view's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImageFor {
-    Sonogram,
-    Spectral,
-}
-
-/// The levels and the waveform as rings of columns, and one image per view.
+/// The levels and the waveform as rings of columns, and their image. The sonogram and the
+/// spectral view each have one, fed by their own analysis.
 pub struct SonogramView {
     /// Levels in dB, column by column, lane by lane, lowest frequency first.
     levels: Vec<f32>,
@@ -61,7 +55,7 @@ pub struct SonogramView {
     /// Columns written since the start, to know what each image lacks.
     written: u64,
     generation: u64,
-    images: [Image; 2],
+    image: Image,
 }
 
 impl Default for SonogramView {
@@ -73,7 +67,7 @@ impl Default for SonogramView {
             head: 0,
             written: 0,
             generation: 0,
-            images: [Image::default(), Image::default()],
+            image: Image::default(),
         }
     }
 }
@@ -82,15 +76,15 @@ impl Default for SonogramView {
 const IMAGE_ROWS: usize = MAX_LANES * SONOGRAM_ROWS;
 
 impl SonogramView {
-    /// Takes the new columns out of `data` and writes them into the rings.
-    pub fn take_columns(&mut self, data: &mut Published) {
-        if data.sonogram.generation != self.generation {
-            self.generation = data.sonogram.generation;
+    /// Takes the new columns out of `feed` and writes them into the rings.
+    pub fn take_columns(&mut self, feed: &mut SonogramFeed) {
+        if feed.generation != self.generation {
+            self.generation = feed.generation;
             self.levels.fill(FLOOR_DB);
             self.waves.fill([WaveExtent::default(); MAX_LANES]);
-            self.images.iter_mut().for_each(|image| image.stale = true);
+            self.image.stale = true;
         }
-        for column in data.sonogram.columns.drain(..) {
+        for column in feed.columns.drain(..) {
             // Each column says how many lanes it has.
             self.lanes = (column.levels.len() / SONOGRAM_ROWS).clamp(1, MAX_LANES);
             let start = self.head * MAX_LANES * SONOGRAM_ROWS;
@@ -113,39 +107,38 @@ impl SonogramView {
     }
 
     fn column_image(&self, image: &Image, column: usize) -> ColorImage {
-        let mut pixels = ColorImage::new([1, IMAGE_ROWS], Color32::BLACK);
+        let mut pixels = ColorImage::new([1, IMAGE_ROWS], Color32::TRANSPARENT);
         for lane in 0..MAX_LANES {
             for row in 0..SONOGRAM_ROWS {
                 pixels.pixels[Self::image_row(lane, row)] = image
                     .palette
-                    .color(image.tone.tone(self.level(column, lane, row)));
+                    .image_color(image.tone.tone(self.level(column, lane, row)));
             }
         }
         pixels
     }
 
     fn full_image(&self, image: &Image) -> ColorImage {
-        let mut pixels = ColorImage::new([COLUMNS, IMAGE_ROWS], Color32::BLACK);
+        let mut pixels = ColorImage::new([COLUMNS, IMAGE_ROWS], Color32::TRANSPARENT);
         for column in 0..COLUMNS {
             for lane in 0..MAX_LANES {
                 for row in 0..SONOGRAM_ROWS {
                     pixels.pixels[Self::image_row(lane, row) * COLUMNS + column] = image
                         .palette
-                        .color(image.tone.tone(self.level(column, lane, row)));
+                        .image_color(image.tone.tone(self.level(column, lane, row)));
                 }
             }
         }
         pixels
     }
 
-    /// Uploads what changed in the image of `which`, colored with `heat` and `tone`.
-    fn update(&mut self, ui: &Ui, which: ImageFor, heat: HeatStyle, tone: &SonogramSettings) {
-        let index = which as usize;
+    /// Uploads what changed in the image, colored with `heat` and `tone`.
+    fn update(&mut self, ui: &Ui, heat: HeatStyle, tone: &SonogramSettings) {
         let toned = |settings: &SonogramSettings| {
             (settings.range, settings.brightness_db, settings.contrast)
         };
         {
-            let image = &mut self.images[index];
+            let image = &mut self.image;
             if heat != image.palette.heat() {
                 image.palette = Palette::new(heat);
                 image.stale = true;
@@ -156,16 +149,16 @@ impl SonogramView {
             }
         }
         let options = TextureOptions::LINEAR;
-        let image = &self.images[index];
+        let image = &self.image;
         let missing = self.written - image.uploaded;
         if image.stale || image.texture.is_none() || missing >= COLUMNS as u64 {
             let pixels = self.full_image(image);
-            let image = &mut self.images[index];
+            let image = &mut self.image;
             match &mut image.texture {
                 Some(texture) => texture.set(pixels, options),
                 None => {
-                    let name = format!("o-aud-a-sonogram-{index}");
-                    image.texture = Some(ui.ctx().load_texture(name, pixels, options));
+                    let texture = ui.ctx().load_texture("o-aud-a-sonogram", pixels, options);
+                    image.texture = Some(texture);
                 }
             }
             image.stale = false;
@@ -176,7 +169,7 @@ impl SonogramView {
             .map(|age| (self.head + COLUMNS - 1 - age) % COLUMNS)
             .map(|column| (column, self.column_image(image, column)))
             .collect();
-        let image = &mut self.images[index];
+        let image = &mut self.image;
         if let Some(texture) = &mut image.texture {
             for (column, pixels) in columns {
                 texture.set_partial([column, 0], pixels, options);
@@ -190,16 +183,9 @@ impl SonogramView {
         (self.head + (fraction.clamp(0.0, 0.9999) * COLUMNS as f32) as usize) % COLUMNS
     }
 
-    /// Draws one lane of the image of `which`, from the oldest column to the newest,
-    /// across `plot`.
-    fn draw_image(
-        &self,
-        painter: &Painter,
-        plot: Rect,
-        (which, lane): (ImageFor, usize),
-        tint: Color32,
-    ) {
-        let Some(texture) = &self.images[which as usize].texture else {
+    /// Draws one lane of the image, from the oldest column to the newest, across `plot`.
+    fn draw_image(&self, painter: &Painter, plot: Rect, lane: usize, tint: Color32) {
+        let Some(texture) = &self.image.texture else {
             return;
         };
         let split = self.head as f32 / COLUMNS as f32;
@@ -224,9 +210,9 @@ impl SonogramView {
         );
     }
 
-    /// The palette of the image of `which`, for color bars.
-    fn palette(&self, which: ImageFor) -> &Palette {
-        &self.images[which as usize].palette
+    /// The palette of the image, for color bars.
+    fn palette(&self) -> &Palette {
+        &self.image.palette
     }
 }
 
@@ -304,12 +290,12 @@ fn time_axis(painter: &Painter, plot: Rect, span_s: f32) {
     }
 }
 
-fn freq_axis(data: &Published) -> Option<FreqAxis> {
-    let (low_hz, high_hz) = data.sonogram.range_hz;
+fn freq_axis(feed: &SonogramFeed) -> Option<FreqAxis> {
+    let (low_hz, high_hz) = feed.range_hz;
     (high_hz > low_hz).then_some(FreqAxis {
         low_hz,
         high_hz,
-        scale: data.sonogram.scale,
+        scale: feed.scale,
     })
 }
 
@@ -349,13 +335,13 @@ pub fn draw(
         pos2(rect.right() - 12.0 - legend_width, rect.bottom() - 24.0),
     );
     let painter = ui.painter_at(rect);
-    view.update(ui, ImageFor::Sonogram, style.heat, settings);
+    view.update(ui, style.heat, settings);
     let lanes = lane_rects(plot, view.lanes);
     let names = lane_names(settings);
-    let axis = freq_axis(data);
+    let axis = freq_axis(&data.sonogram);
     for (index, lane) in lanes.iter().enumerate() {
         plot_background(&painter, *lane);
-        view.draw_image(&painter, *lane, (ImageFor::Sonogram, index), Color32::WHITE);
+        view.draw_image(&painter, *lane, index, Color32::WHITE);
         if let Some(axis) = axis {
             freq_grid_horizontal(&painter, *lane, axis, true);
         }
@@ -385,7 +371,7 @@ pub fn draw(
                 ),
                 pos2(bar.right(), bar.bottom() - bar.height() * fraction),
             );
-            painter.rect_filled(slice, 0.0, view.palette(ImageFor::Sonogram).color(fraction));
+            painter.rect_filled(slice, 0.0, view.palette().color(fraction));
         }
         for db in [0.0, -30.0, -60.0, -90.0, -120.0] {
             let fraction = settings.tone(db);
@@ -534,7 +520,7 @@ fn draw_waveform(
     painter.with_clip_rect(lane_rect).add(Shape::mesh(mesh));
 }
 
-/// Draws the spectral view: the sonogram with the waveform of the same signal on top.
+/// Draws the spectral view: its own sonogram with the waveform of the same signal on top.
 pub fn draw_spectral(
     ui: &mut Ui,
     rect: Rect,
@@ -549,13 +535,13 @@ pub fn draw_spectral(
         pos2(rect.right() - 40.0, rect.bottom() - 24.0),
     );
     let painter = ui.painter_at(rect);
-    view.update(ui, ImageFor::Spectral, style.heat, sonogram);
+    view.update(ui, style.heat, sonogram);
     let image_opacity = SpectralSettings::OPACITY.clamp(spectral.sonogram_opacity);
     let wave_opacity = SpectralSettings::OPACITY.clamp(spectral.waveform_opacity);
     let gain_db = SpectralSettings::WAVEFORM_GAIN_DB.clamp(spectral.waveform_gain_db);
     let lanes = lane_rects(plot, view.lanes);
     let names = lane_names(sonogram);
-    let axis = freq_axis(data);
+    let axis = freq_axis(&data.spectral);
     let second = if sonogram.signals().1 == Some(Signal::Side) {
         style.side
     } else {
@@ -565,12 +551,7 @@ pub fn draw_spectral(
     for (index, lane) in lanes.iter().enumerate() {
         plot_background(&painter, *lane);
         if image_opacity > 0.0 {
-            view.draw_image(
-                &painter,
-                *lane,
-                (ImageFor::Spectral, index),
-                alpha(Color32::WHITE, image_opacity),
-            );
+            view.draw_image(&painter, *lane, index, alpha(Color32::WHITE, image_opacity));
         }
         if let Some(axis) = axis {
             freq_grid_horizontal(&painter, *lane, axis, true);

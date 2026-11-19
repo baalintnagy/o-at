@@ -62,6 +62,8 @@ pub struct Published {
     pub channels: u32,
     pub spectrum: SpectrumFrame,
     pub sonogram: SonogramFeed,
+    /// The spectral view's sonogram layer, analyzed with its own settings.
+    pub spectral: SonogramFeed,
     pub surface: SurfaceFrame,
     /// The latest frames for the stereo scope and the oscilloscope, oldest first: at
     /// least [`ScopeSamples::MAX`], more for long oscilloscope spans.
@@ -175,9 +177,11 @@ pub struct Engine {
     stereo: StereoMeter,
     spectrum: SpectrumStage,
     sonogram: SonogramStage,
+    spectral: SonogramStage,
     surface: SurfaceStage,
     spectrum_ticker: Ticker,
     sonogram_ticker: Ticker,
+    spectral_ticker: Ticker,
     surface_ticker: Ticker,
     loudness_blocks: u32,
     out: Published,
@@ -194,6 +198,7 @@ impl Engine {
     pub fn new(sample_rate: u32, channels: u32, settings: &AnalyzerSettings) -> Self {
         let rate = sample_rate as f32;
         let sonogram = SonogramStage::new(settings.sonogram, rate);
+        let spectral = SonogramStage::new(settings.spectral_sonogram(), rate);
         Self {
             sample_rate,
             channels,
@@ -203,6 +208,8 @@ impl Engine {
             spectrum: SpectrumStage::new(settings.spectrum, rate),
             sonogram_ticker: Ticker::new(rate, sonogram.rate_hz()),
             sonogram,
+            spectral_ticker: Ticker::new(rate, spectral.rate_hz()),
+            spectral,
             surface: SurfaceStage::new(settings.surface, settings.sonogram, rate),
             spectrum_ticker: Ticker::new(rate, SPECTRUM_RATE_HZ),
             surface_ticker: Ticker::new(rate, SURFACE_RATE_HZ),
@@ -230,6 +237,8 @@ impl Engine {
         self.spectrum.configure(settings.spectrum);
         self.sonogram.configure(settings.sonogram);
         self.sonogram_ticker.set_rate(rate, self.sonogram.rate_hz());
+        self.spectral.configure(settings.spectral_sonogram());
+        self.spectral_ticker.set_rate(rate, self.spectral.rate_hz());
         self.surface.configure(settings.surface, settings.sonogram);
         self.scope_frames = scope_frames(settings.oscilloscope.span, rate);
     }
@@ -284,6 +293,10 @@ impl Engine {
         if self.sonogram_ticker.step() {
             self.sonogram.tick(&self.history, &mut self.out.sonogram);
         }
+        self.spectral.observe(frame);
+        if self.spectral_ticker.step() {
+            self.spectral.tick(&self.history, &mut self.out.spectral);
+        }
         if self.surface_ticker.step() {
             self.surface.tick(&self.history, &mut self.out.surface);
             self.surface_dirty = true;
@@ -304,21 +317,8 @@ impl Engine {
                 .extend(self.history.latest(self.scope_frames));
             self.spectrum_dirty = false;
         }
-        let feed = &mut self.out.sonogram;
-        if published.sonogram.generation != feed.generation {
-            published.sonogram.columns.clear();
-        }
-        published.sonogram.generation = feed.generation;
-        published.sonogram.range_hz = feed.range_hz;
-        published.sonogram.scale = feed.scale;
-        published.sonogram.lanes = feed.lanes;
-        published.sonogram.columns.extend(feed.columns.drain(..));
-        let excess = published
-            .sonogram
-            .columns
-            .len()
-            .saturating_sub(spectrum::SONOGRAM_QUEUE);
-        published.sonogram.columns.drain(..excess);
+        hand_over(&mut self.out.sonogram, &mut published.sonogram);
+        hand_over(&mut self.out.spectral, &mut published.spectral);
         if self.surface_dirty {
             published.surface.clone_from(&self.out.surface);
             self.surface_dirty = false;
@@ -340,6 +340,24 @@ impl Engine {
         published.dropped_frames = dropped_frames;
         published.sequence += 1;
     }
+}
+
+/// Moves the new columns of `feed` to `published`, keeping at most
+/// [`spectrum::SONOGRAM_QUEUE`] that the editor has not taken yet.
+fn hand_over(feed: &mut SonogramFeed, published: &mut SonogramFeed) {
+    if published.generation != feed.generation {
+        published.columns.clear();
+    }
+    published.generation = feed.generation;
+    published.range_hz = feed.range_hz;
+    published.scale = feed.scale;
+    published.lanes = feed.lanes;
+    published.columns.extend(feed.columns.drain(..));
+    let excess = published
+        .columns
+        .len()
+        .saturating_sub(spectrum::SONOGRAM_QUEUE);
+    published.columns.drain(..excess);
 }
 
 /// The running worker; dropping it stops the thread.

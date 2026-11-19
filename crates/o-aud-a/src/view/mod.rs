@@ -15,6 +15,7 @@ use aud_ui::theme::{ALERT, BORDER, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, alpha, mon
 use aud_ui::widgets::{button, pill, segmented, title};
 use egui::{Align2, CornerRadius, CursorIcon, Id, Key, Rect, Sense, StrokeKind, Ui, pos2, vec2};
 
+use crate::analysis::spectrum::SonogramFeed;
 use crate::analysis::{AnalysisShared, Published};
 use crate::layout::Module;
 use crate::settings::{AnalyzerSettings, Choice, Signal, SonogramSettings, Tab};
@@ -54,6 +55,8 @@ pub struct ViewState {
     overload_s: f32,
     spectrum: spectrum::SpectrumView,
     sonogram: sonogram::SonogramView,
+    /// The spectral view's own sonogram.
+    spectral: sonogram::SonogramView,
     stereo: stereo::StereoView,
     oscilloscope: oscilloscope::OscilloscopeView,
     surface: surface::SurfaceView,
@@ -72,7 +75,8 @@ pub fn draw(
     let elapsed_s = ui.input(|input| input.stable_dt).min(0.1);
     if !state.frozen {
         shared.with_published(|published| take(&mut state.data, published));
-        state.sonogram.take_columns(&mut state.data);
+        state.sonogram.take_columns(&mut state.data.sonogram);
+        state.spectral.take_columns(&mut state.data.spectral);
         state.oscilloscope.take_envelope(&mut state.data);
     }
     if state.data.dropped_frames != state.last_dropped {
@@ -83,7 +87,7 @@ pub fn draw(
 
     let before = shared.settings();
     let mut settings = before;
-    settings.stereo.upgrade();
+    settings.upgrade();
     let colors = Colors::new(&settings);
     set_colors(ui.ctx(), colors);
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
@@ -139,13 +143,8 @@ fn take(data: &mut Published, published: &mut Published) {
     data.sample_rate = published.sample_rate;
     data.channels = published.channels;
     data.spectrum.clone_from(&published.spectrum);
-    data.sonogram.generation = published.sonogram.generation;
-    data.sonogram.range_hz = published.sonogram.range_hz;
-    data.sonogram.scale = published.sonogram.scale;
-    data.sonogram.lanes = published.sonogram.lanes;
-    data.sonogram
-        .columns
-        .extend(published.sonogram.columns.drain(..));
+    take_feed(&mut data.sonogram, &mut published.sonogram);
+    take_feed(&mut data.spectral, &mut published.spectral);
     data.surface.clone_from(&published.surface);
     data.scope.clone_from(&published.scope);
     data.stereo = published.stereo;
@@ -156,6 +155,15 @@ fn take(data: &mut Published, published: &mut Published) {
     data.envelope.extend(published.envelope.drain(..));
     data.dropped_frames = published.dropped_frames;
     data.sequence = published.sequence;
+}
+
+/// Copies a sonogram feed, handing over its columns.
+fn take_feed(data: &mut SonogramFeed, published: &mut SonogramFeed) {
+    data.generation = published.generation;
+    data.range_hz = published.range_hz;
+    data.scale = published.scale;
+    data.lanes = published.lanes;
+    data.columns.extend(published.columns.drain(..));
 }
 
 /// Resets requested by the user.
@@ -427,9 +435,9 @@ fn draw_module(
         Module::Spectral => sonogram::draw_spectral(
             ui,
             rect,
-            &mut state.sonogram,
+            &mut state.spectral,
             data,
-            (&settings.sonogram, &settings.spectral),
+            (&settings.spectral_sonogram(), &settings.spectral),
             (colors, &styles.spectral),
         ),
         Module::Stereo => stereo::draw(

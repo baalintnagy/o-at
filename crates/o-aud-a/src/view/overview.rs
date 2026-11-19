@@ -2,7 +2,9 @@
 //! dragging its title and resized by dragging the gaps around it.
 
 use aud_ui::theme::{BORDER, PANEL_RAISED, TEXT, TEXT_DIM, alpha, font, stroke};
-use egui::{Align2, CornerRadius, CursorIcon, Id, Pos2, Rect, Sense, StrokeKind, Ui, pos2, vec2};
+use egui::{
+    Align2, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, pos2, vec2,
+};
 
 use crate::layout::{DropZone, MIN_WEIGHT, Module, OverviewLayout};
 use crate::settings::AnalyzerSettings;
@@ -146,6 +148,9 @@ pub fn draw(
         );
         return Actions::default();
     }
+    // The title strips are registered before the views, so the buttons in the views'
+    // headers lie on top of them and receive their clicks.
+    let strips = title_strips(ui, &rows);
     let mut actions = Actions::default();
     for cell in rows.iter().flatten() {
         let compact = cell.rect.width() < COMPACT_WIDTH || cell.rect.height() < COMPACT_HEIGHT;
@@ -161,7 +166,7 @@ pub fn draw(
     resize_handles(ui, &rows, area, &mut settings.overview, colors);
     move_handles(
         ui,
-        &rows,
+        (&rows, &strips),
         &mut state.overview,
         &mut settings.overview,
         colors,
@@ -254,23 +259,34 @@ fn resize_handles(
     }
 }
 
+/// The draggable title strip of each module, in the order of `rows`.
+fn title_strips(ui: &Ui, rows: &[Vec<Cell>]) -> Vec<Response> {
+    rows.iter()
+        .flatten()
+        .map(|cell| {
+            let strip = Rect::from_min_size(cell.rect.min, vec2(cell.rect.width(), TITLE_HEIGHT));
+            ui.interact(
+                strip,
+                Id::new(("overview-move", cell.module)),
+                Sense::drag(),
+            )
+        })
+        .collect()
+}
+
 /// Title strips that move modules by drag and drop.
 fn move_handles(
     ui: &mut Ui,
-    rows: &[Vec<Cell>],
+    (rows, strips): (&[Vec<Cell>], &[Response]),
     state: &mut OverviewState,
     layout: &mut OverviewLayout,
     colors: &Colors,
 ) {
     let mut released = false;
-    for cell in rows.iter().flatten() {
-        let strip = Rect::from_min_size(cell.rect.min, vec2(cell.rect.width(), TITLE_HEIGHT));
-        let response = ui
-            .interact(
-                strip,
-                Id::new(("overview-move", cell.module)),
-                Sense::drag(),
-            )
+    for (cell, response) in rows.iter().flatten().zip(strips) {
+        let strip = response.rect;
+        let response = response
+            .clone()
             .on_hover_cursor(CursorIcon::Grab)
             .on_hover_text("Drag to move");
         // Grip dots centred on the top edge.

@@ -104,6 +104,10 @@ const ICE: [Rgb; 6] = [
 ];
 const GRAY: [Rgb; 2] = [[0x0b, 0x0d, 0x12], [0xff, 0xff, 0xff]];
 
+/// Fraction of a heat map, from its quiet end, over which images fade into the diagram
+/// background.
+const IMAGE_FADE: f32 = 0.15;
+
 /// Lookup table of 256 colors from quiet to loud.
 #[derive(Clone, Debug)]
 pub struct Palette {
@@ -148,6 +152,14 @@ impl Palette {
     /// Color of `fraction` from 0 (quiet) to 1 (loud).
     pub fn color(&self, fraction: f32) -> Color32 {
         self.colors[(fraction.clamp(0.0, 1.0) * 255.0).round() as usize]
+    }
+
+    /// Color of `fraction` for images drawn over the diagram background: the quietest
+    /// part of the map fades out, so silence shows the background color.
+    pub fn image_color(&self, fraction: f32) -> Color32 {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let opacity = (fraction / IMAGE_FADE).min(1.0);
+        self.color(fraction).gamma_multiply(opacity)
     }
 }
 

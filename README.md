@@ -253,13 +253,13 @@ analysis fell behind. Its pages, in this order, show:
 | Page | What it shows | Options |
 | --- | --- | --- |
 | Overview | Any of the views at once, arranged as you like: switch each one on or off under **VIEWS**, drag a view's title onto another to move it beside, above or below it, and drag the gaps to resize. Narrow loudness panels show their numbers in a strip above the meters, and the history when it fits. | Seven views, up to four rows; reset layout |
-| Spectral | Two layers: the sonogram, and on top of it the waveform of the same signal, aligned column by column (peak extent and RMS core), as in spectral editors. | Sonogram layer: opacity, brightness, contrast; waveform layer: opacity, gain (vertical zoom), linear or dB scale; and the sonogram options. The opacity sliders are logarithmic. |
+| Spectral | Two layers: a sonogram, and on top of it the waveform of the same signal, aligned column by column (peak extent and RMS core), as in spectral editors. Its sonogram is independent of the Sonogram page: it has its own FFT, channels, scale, speed and range. | Sonogram layer: opacity, brightness, contrast and every sonogram option; waveform layer: opacity, gain (vertical zoom), linear or dB scale. The opacity sliders are logarithmic. |
 | Spectrum | Spectrum of left and right, mid and side, or one signal, with peak hold and a hover readout of frequency, note and level. | FFT 1K–32K, Hann, Blackman-Harris or flat-top window, averaging (off to infinite), 1/24–1/3 octave smoothing, 0–6 dB/oct slope, 30–150 dB range, 20 kHz or Nyquist, log, linear or semitone (ST) frequency scale |
 | Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, one signal (mid, side, left or right) or two stacked lanes (L · R or M · S), log, linear or semitone (ST) frequency, 15–240 columns/s, 30–150 dB range |
 | Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1 ms – 60 s span (above 500 ms a scrolling roll view of the min/max envelope, without trigger); L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
 | Stereo | Goniometer, correlation and balance, mid and side levels, the side-to-mid ratio (in the header), and the stereo position and width of 30 third-octave bands (red where they are out of phase). | M/S goniometer, polar sample cloud or L/R scope, each drawn as dots or lines; 512–4096 samples; automatic or fixed gain; band FFT length (shared with the spectrum) |
-| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history. The header shows the target and the measured time. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; RESET in the panel header or in its settings |
-| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, shift-drag or right-drag to move, wheel to zoom, double-click to reset. | 64–256 bands, 32–128 rows, 30–150 dB range, camera rotation, elevation and zoom with RESET VIEW, FFT, one scene or two stacked ones (L · R or M · S); its heat map is a color |
+| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history, all on the diagrams' shared background and grid. The header shows the target and the measured time. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; RESET in the panel header or in its settings |
+| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, shift-drag or right-drag to move, wheel to zoom, double-click to reset. | 64–256 bands, 32–128 rows, 30–150 dB range, a 3D grid (floor, back walls and dB levels), camera rotation, elevation and zoom with RESET VIEW, FFT, one scene or two stacked ones (L · R or M · S, shared with the Sonogram page); its heat map is a color |
 
 | | |
 | --- | --- |
@@ -270,7 +270,7 @@ analysis fell behind. Its pages, in this order, show:
 | ![Stereo page](docs/o-aud-a/stereo.png) | ![Loudness page](docs/o-aud-a/loudness.png) |
 | **Stereo**: the goniometer, the meters, and each third-octave band's position (dot) and width (bar). | **Loudness**: integrated loudness against the target, the readouts, M, S and I bars, the history of short-term and momentary loudness and true peak per channel. |
 | ![3D page](docs/o-aud-a/3d.png) | ![Spectrum settings popup](docs/o-aud-a/settings.png) |
-| **3D**: the spectrum history as a shaded surface; the footer shows the camera's yaw, pitch and zoom. | **Settings**: the spectrum's SETTINGS tab, with segmented selectors and sliders. |
+| **3D**: the spectrum history as a shaded surface with the 3D grid on; the footer shows the camera's yaw, pitch and zoom. | **Settings**: the spectrum's SETTINGS tab, with segmented selectors and sliders. |
 
 The screenshots show a synthetic test piece: chords, bass, drums and a melody, panned
 across the stereo field.
@@ -283,7 +283,7 @@ Every view has a popup, opened with the button at the right end of its header or
 - Its **SETTINGS** tab holds what the view shows: segmented selectors for kinds (window,
   channels, scale) and sliders for ranges and steps (FFT length, level range, slope,
   speed, time span). Double-click a slider to reset it. Headings mark settings shared
-  with another view, for example the spectral view's sonogram layer.
+  with another view, for example the 3D view's analysis, which is the Sonogram page's.
 - Its **COLORS** tab holds the view's colors, each with a color picker and, where it
   applies, an opacity, brightness or contrast slider. Examples: the spectrum's left/mid,
   right and side curves, fill and peak hold; the loudness meter's short-term and

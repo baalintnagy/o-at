@@ -44,29 +44,34 @@ flat-top); mid and side are `(L ± R) / 2`.
 The sonogram has its own FFT, taken at its speed (15–240 columns/s). Each column has
 512 rows from 20 Hz (log) or 0 Hz (linear) to 20 kHz or the Nyquist frequency. The
 editor keeps 1 024 columns as a ring in a texture, uploads only new columns, and draws
-the ring as two textured rectangles.
+the ring as two textured rectangles. The quietest 15 % of the heat map fades to
+transparent, so silence shows the diagrams' shared background.
 
 The 3D views use the sonogram's FFT length at 30 rows/s: 64–256 logarithmic bands from
 20 Hz to 20 kHz. The stereogram distributes each bin's power by its equal-power pan
 position, `atan2(|R|, |L|)`, into 49 columns per band and decays with a 0.35 s time
 constant; the real part of the cross spectrum colors cells with opposite phase.
 Surfaces are drawn as egui meshes with quads sorted far to near and simple diffuse
-shading.
+shading. The optional 3D grid (`grid`) draws the floor and the two walls farther from
+the camera, chosen each frame from the camera's position, with level lines every 10,
+20 or 30 dB down from 0 dB.
 
-The spectral view draws the same ring of columns and, on top, the waveform each column
-covers: the worker records the minimum, maximum and RMS of the sonogram's signal
-between two columns. Each pixel column shows the peak extent and, brighter, ±RMS, on a
+The spectral view has a sonogram of its own: the worker runs a second sonogram stage
+with the spectral view's settings (`spectral.sonogram`) and publishes it as a feed of
+its own, and the editor keeps a second ring and texture. Sessions of earlier versions,
+where the spectral view shared the sonogram's settings, start from a copy of them. On
+top of its sonogram the spectral view draws the waveform each column covers: the worker
+records the minimum, maximum and RMS of the column's signal between two columns. Each pixel column shows the peak extent and, brighter, ±RMS, on a
 linear scale or in dB from −60 dBFS at the centre line. Each layer has its own
 opacity; the waveform's gain zooms it vertically (0–36 dB), and the sonogram's
 brightness (±30 dB level offset) and contrast (0.3–3×, the slope of the color scale
-around its middle) set how strongly the image reads. Brightness and contrast are
-sonogram settings, so the sonogram page and the spectral view look alike.
+around its middle) set how strongly the image reads.
 
-With CHANNELS set to L · R or M · S, the sonogram, spectral and 3D views show two
-lanes, one above the other: every sonogram column then carries the levels and the
+With CHANNELS set to L · R or M · S, the sonogram (and with it the 3D views) or the
+spectral view show two lanes, one above the other: every sonogram column then carries the levels and the
 waveform extent of both signals, the editor's texture holds both lanes, and the 3D
 history rows hold both band sets, each drawn as its own scene with the same camera.
-Changing CHANNELS restarts the sonogram.
+Changing CHANNELS restarts that sonogram.
 
 ## Stereo
 

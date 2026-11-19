@@ -1,7 +1,7 @@
 //! The 3D views: the spectrum history as ridges or a shaded surface, and the stereogram,
 //! a surface of level over stereo position and frequency.
 
-use aud_ui::theme::{BACKGROUND, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
 use egui::{
     Align2, Color32, CursorIcon, Id, Mesh, Painter, PointerButton, Pos2, Rect, Sense, Shape, Ui,
@@ -13,7 +13,7 @@ use crate::analysis::spectrum::{PAN_COLUMNS, SURFACE_RATE_HZ, SurfaceFrame};
 use crate::settings::{SurfaceMode, SurfaceSettings};
 use crate::style::SurfaceStyle;
 use crate::view::colormap::{Colors, Palette, rgb};
-use crate::view::plot::{Header, format_hz, grid_strong, plot_background};
+use crate::view::plot::{Header, background, format_hz, grid, grid_strong, plot_background};
 
 /// Height of a full-scale level in scene units; the floor spans −1..1 in x and z.
 const HEIGHT: f32 = 0.7;
@@ -138,6 +138,9 @@ pub fn draw(
                 let camera = Camera::new(settings, lane_rect, plot);
                 let clipped = painter.with_clip_rect(lane_rect.shrink(1.0));
                 draw_floor(&clipped, &camera);
+                if settings.grid {
+                    draw_grid(&clipped, &camera, settings.range);
+                }
                 draw_spectrum_lane(&clipped, &camera, view, (surface, lane), settings, &level);
                 if lanes > 1 {
                     lane_label(&painter, lane_rect, name);
@@ -155,6 +158,9 @@ pub fn draw(
             let camera = Camera::new(settings, plot, plot);
             let clipped = painter.with_clip_rect(plot.shrink(1.0));
             draw_floor(&clipped, &camera);
+            if settings.grid {
+                draw_grid(&clipped, &camera, settings.range);
+            }
             let bands = surface.bands;
             if surface.stereo_db.len() != bands * PAN_COLUMNS {
                 return;
@@ -276,10 +282,12 @@ fn draw_spectrum_lane(
         let base: Vec<Pos2> = (0..bands)
             .map(|band| camera.screen([x_of(band), 0.0, z]))
             .collect();
+        // Ridges hide the ones behind them with the diagram background.
+        let hide = alpha(background(clipped), 0.94);
         let mut fill = Mesh::default();
         for (index, (top, bottom)) in points.iter().zip(&base).enumerate() {
-            fill.colored_vertex(*top, alpha(BACKGROUND, 0.94));
-            fill.colored_vertex(*bottom, alpha(BACKGROUND, 0.94));
+            fill.colored_vertex(*top, hide);
+            fill.colored_vertex(*bottom, hide);
             if index > 0 {
                 let vertex = 2 * index as u32;
                 fill.add_triangle(vertex - 2, vertex - 1, vertex);
@@ -392,6 +400,72 @@ fn draw_floor(painter: &Painter, camera: &Camera) {
         camera.screen([-1.0, HEIGHT, 1.0]),
     ];
     painter.line_segment(axis, stroke(1.0, grid_strong(painter)));
+}
+
+/// Grid divisions along each side of the floor and up the walls.
+const GRID_DIVISIONS: usize = 4;
+
+/// A grid on the floor and on the two walls behind the scene, the ones farther from the
+/// camera, with level lines labelled in dB every 10, 20 or 30 dB down from 0 dB; the
+/// floor is at `-range_db`.
+fn draw_grid(painter: &Painter, camera: &Camera, range_db: f32) {
+    let line = stroke(1.0, alpha(grid(painter), 0.8));
+    let steps =
+        || (0..=GRID_DIVISIONS).map(|step| -1.0 + 2.0 * step as f32 / GRID_DIVISIONS as f32);
+    let depth = |point: [f32; 3]| camera.project(point).1;
+    let middle = HEIGHT * 0.5;
+    let wall_x = if depth([-1.0, middle, 0.0]) > depth([1.0, middle, 0.0]) {
+        -1.0
+    } else {
+        1.0
+    };
+    let wall_z = if depth([0.0, middle, -1.0]) > depth([0.0, middle, 1.0]) {
+        -1.0
+    } else {
+        1.0
+    };
+    let segment = |from: [f32; 3], to: [f32; 3]| {
+        painter.line_segment([camera.screen(from), camera.screen(to)], line);
+    };
+    for along in steps() {
+        // Floor lines in both directions.
+        segment([along, 0.0, -1.0], [along, 0.0, 1.0]);
+        segment([-1.0, 0.0, along], [1.0, 0.0, along]);
+        // Vertical lines up the back walls.
+        segment([wall_x, 0.0, along], [wall_x, HEIGHT, along]);
+        segment([along, 0.0, wall_z], [along, HEIGHT, wall_z]);
+    }
+    // Level lines on round steps down from 0 dB at the top.
+    let step_db = if range_db <= 60.0 {
+        10.0
+    } else if range_db <= 120.0 {
+        20.0
+    } else {
+        30.0
+    };
+    let levels = (0..)
+        .map(|step| -(step as f32) * step_db)
+        .take_while(|db| *db > -range_db);
+    for db in levels {
+        let fraction = 1.0 + db / range_db;
+        let y = HEIGHT * fraction;
+        segment([wall_x, y, -1.0], [wall_x, y, 1.0]);
+        segment([-1.0, y, wall_z], [1.0, y, wall_z]);
+        // The level at the corner where the walls meet.
+        let corner = camera.screen([wall_x, y, wall_z]);
+        let (offset, align) = if corner.x < camera.centre.x {
+            (vec2(-6.0, 0.0), Align2::RIGHT_CENTER)
+        } else {
+            (vec2(6.0, 0.0), Align2::LEFT_CENTER)
+        };
+        painter.text(
+            corner + offset,
+            align,
+            format!("{db:.0}"),
+            mono(9.0),
+            TEXT_FAINT,
+        );
+    }
 }
 
 /// Frequency lines across the floor and the time axis of the spectrum history.

@@ -201,6 +201,11 @@ pub fn colors(painter: &Painter) -> Colors {
         .unwrap_or_default()
 }
 
+/// The diagrams' background color.
+pub fn background(painter: &Painter) -> Color32 {
+    colors(painter).plot
+}
+
 /// Grid line color.
 pub fn grid(painter: &Painter) -> Color32 {
     colors(painter).grid

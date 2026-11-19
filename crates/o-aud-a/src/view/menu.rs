@@ -170,7 +170,7 @@ fn entries(module: Module, settings: &mut AnalyzerSettings) -> Vec<Entry<'_>> {
                     percent,
                 ),
             ];
-            list.extend(tone_entries(sonogram));
+            list.extend(tone_entries(spectral.sonogram.get_or_insert(*sonogram)));
             list.extend([
                 Entry::Heading("WAVEFORM LAYER"),
                 Entry::Color("Left · mid", &mut spectral_style.first),
@@ -478,8 +478,8 @@ fn settings_tab(
                 |db| format!("+{db:.0} dB"),
             );
             grid.choice("Amplitude scale", &mut spectral.scale, 36.0);
-            grid.heading("SONOGRAM LAYER · shared with the sonogram");
-            sonogram_rows(grid, &mut settings.sonogram);
+            grid.heading("SONOGRAM LAYER");
+            sonogram_rows(grid, spectral.sonogram.get_or_insert(settings.sonogram));
         }
         Module::Surface => {
             let surface = &mut settings.surface;
@@ -487,6 +487,7 @@ fn settings_tab(
             grid.steps("Bands", &mut surface.bands);
             grid.steps("History rows", &mut surface.depth);
             grid.number("Level range", &mut surface.range, LEVEL_RANGE_DB, whole_db);
+            grid.toggle("3D grid", &mut surface.grid);
             grid.heading("ANALYSIS · shared with the sonogram");
             let sonogram = &mut settings.sonogram;
             grid.steps("FFT length", &mut sonogram.fft);
