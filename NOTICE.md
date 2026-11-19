@@ -18,7 +18,7 @@ code.
 
 | Component | License |
 | --- | --- |
-| NIH-plug, nih_plug_egui | ISC |
+| NIH-plug, nih_plug_egui; `vendor/nih_plug` is a modified copy of its `nih_plug` crate (see [vendor/README.md](vendor/README.md)) | ISC |
 | vst3-sys and related COM crates (VST3 builds) | GPLv3 |
 | nnnoiseless, including the RNNoise model weights | BSD-3-Clause |
 | DeepFilterNet (libDF `deep_filter`), including the DeepFilterNet3 model weights | MIT or Apache-2.0 |

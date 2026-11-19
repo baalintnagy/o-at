@@ -241,35 +241,72 @@ anywhere; it passes the audio through unchanged and reports no latency. Resize t
 editor from its lower right corner. **FULL SCREEN** (or F11) takes the plugin window
 full screen on Windows, without its frame; **RESTORE** or Esc brings it back. Hosts
 cannot resize NIH-plug editors from their own window frame, so these are the ways to
-change its size. Its pages, in this order, show:
+change its size.
+
+![O-AUD-A overview with the spectral view, stereo imager, spectrum, oscilloscope and loudness meter](docs/o-aud-a/overview.png)
+
+The tabs at the top select a page: the overview, or one view filling the editor. The
+header shows the sample rate and channel layout, and whether a signal arrives:
+**ANALYZING**, **NO SIGNAL**, or **OVERLOAD** when samples were dropped because the
+analysis fell behind. Its pages, in this order, show:
 
 | Page | What it shows | Options |
 | --- | --- | --- |
-| Overview | Any of the views at once, arranged as you like: switch each one on or off, drag a view's title onto another to move it beside, above or below it, and drag the gaps to resize. | Seven views, up to four rows; reset layout |
+| Overview | Any of the views at once, arranged as you like: switch each one on or off under **VIEWS**, drag a view's title onto another to move it beside, above or below it, and drag the gaps to resize. Narrow loudness panels show their numbers in a strip above the meters, and the history when it fits. | Seven views, up to four rows; reset layout |
 | Spectral | Two layers: the sonogram, and on top of it the waveform of the same signal, aligned column by column (peak extent and RMS core), as in spectral editors. | Sonogram layer: opacity, brightness, contrast; waveform layer: opacity, gain (vertical zoom), linear or dB scale; and the sonogram options. The opacity sliders are logarithmic. |
 | Spectrum | Spectrum of left and right, mid and side, or one signal, with peak hold and a hover readout of frequency, note and level. | FFT 1K–32K, Hann, Blackman-Harris or flat-top window, averaging (off to infinite), 1/24–1/3 octave smoothing, 0–6 dB/oct slope, 30–150 dB range, 20 kHz or Nyquist, log, linear or semitone (ST) frequency scale |
 | Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, one signal (mid, side, left or right) or two stacked lanes (L · R or M · S), log, linear or semitone (ST) frequency, 15–240 columns/s, 30–150 dB range |
 | Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1 ms – 60 s span (above 500 ms a scrolling roll view of the min/max envelope, without trigger); L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
-| Stereo | Goniometer, correlation and balance, mid and side levels, and the stereo position and width of 30 third-octave bands (red where they are out of phase). | M/S goniometer, polar sample cloud or L/R scope, each drawn as dots or lines; 512–4096 samples; automatic or fixed gain |
-| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; RESET in the panel header |
-| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, shift-drag or right-drag to move, wheel to zoom, double-click to reset. | 64–256 bands, 32–128 rows, 30–150 dB range, camera rotation, elevation and zoom, FFT, one scene or two stacked ones (L · R or M · S), heat map |
+| Stereo | Goniometer, correlation and balance, mid and side levels, the side-to-mid ratio (in the header), and the stereo position and width of 30 third-octave bands (red where they are out of phase). | M/S goniometer, polar sample cloud or L/R scope, each drawn as dots or lines; 512–4096 samples; automatic or fixed gain; band FFT length (shared with the spectrum) |
+| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history. The header shows the target and the measured time. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; RESET in the panel header or in its settings |
+| 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, shift-drag or right-drag to move, wheel to zoom, double-click to reset. | 64–256 bands, 32–128 rows, 30–150 dB range, camera rotation, elevation and zoom with RESET VIEW, FFT, one scene or two stacked ones (L · R or M · S); its heat map is a color |
+
+| | |
+| --- | --- |
+| ![Spectral page: waveform over sonogram](docs/o-aud-a/spectral.png) | ![Spectrum page](docs/o-aud-a/spectrum.png) |
+| **Spectral**: the waveform's peak extent and RMS core drawn over the sonogram; quiet passages and drum hits line up with their spectra. | **Spectrum**: left and right over a filled area; the header shows the FFT size, bin width and window length. |
+| ![Sonogram page](docs/o-aud-a/sonogram.png) | ![Oscilloscope page](docs/o-aud-a/scope.png) |
+| **Sonogram**: the last 17 s at 60 columns/s, with the heat map's level scale on the right. | **Scope**: left and right overlaid, triggered at the T marker; the header shows the time base, the vertical scale, the gain and the measured frequency. |
+| ![Stereo page](docs/o-aud-a/stereo.png) | ![Loudness page](docs/o-aud-a/loudness.png) |
+| **Stereo**: the goniometer, the meters, and each third-octave band's position (dot) and width (bar). | **Loudness**: integrated loudness against the target, the readouts, M, S and I bars, the history of short-term and momentary loudness and true peak per channel. |
+| ![3D page](docs/o-aud-a/3d.png) | ![Spectrum settings popup](docs/o-aud-a/settings.png) |
+| **3D**: the spectrum history as a shaded surface; the footer shows the camera's yaw, pitch and zoom. | **Settings**: the spectrum's SETTINGS tab, with segmented selectors and sliders. |
+
+The screenshots show a synthetic test piece: chords, bass, drums and a melody, panned
+across the stereo field.
+
+### Settings and colors
 
 Every view has a popup, opened with the button at the right end of its header or by
-**right-clicking the diagram**, on its page and in the overview alike. Its **SETTINGS**
-tab holds what the view shows: segmented selectors for kinds (window, channels,
-scale) and sliders for ranges and steps (FFT length, level range, slope, speed, time
-span); double-click a slider to reset it. Its **COLORS** tab holds the view's
-colors, each with a color picker and, where it applies, an opacity, brightness or
-contrast slider: for example the spectrum's left/mid, right and side curves, fill and
-peak hold, the loudness meter's short-term and momentary lines and its on-target,
-too-loud and too-quiet colors, or the heat map of the sonogram, spectral and 3D views
-(four built-in maps or three custom colors). Every view keeps its own colors, on its
-page and in the overview. The diagrams' background and grid are shared by every view
-and appear in each COLORS tab. **THEME** colors only the controls (buttons, tabs, sliders,
-panel marks), with a preset (O-AT, Phosphor, Sunset, Ocean, Mono, Contrast with
-Okabe-Ito colors) or an accent of your own. The settings, the layout and the selected
-page are stored with the session. **FREEZE** holds the
-display while the measurements continue.
+**right-clicking the diagram**, on its page and in the overview alike.
+
+- Its **SETTINGS** tab holds what the view shows: segmented selectors for kinds (window,
+  channels, scale) and sliders for ranges and steps (FFT length, level range, slope,
+  speed, time span). Double-click a slider to reset it. Headings mark settings shared
+  with another view, for example the spectral view's sonogram layer.
+- Its **COLORS** tab holds the view's colors, each with a color picker and, where it
+  applies, an opacity, brightness or contrast slider. Examples: the spectrum's left/mid,
+  right and side curves, fill and peak hold; the loudness meter's short-term and
+  momentary lines and its on-target, too-loud and too-quiet colors; the heat map of
+  the sonogram, spectral and 3D views (four built-in maps or three custom colors).
+  **Reset this view's colors** restores the defaults.
+- Every view keeps its own colors, on its page and in the overview. The diagrams'
+  background and grid are shared by every view and appear in each COLORS tab.
+- Esc or a click outside closes the popup.
+
+![Sonogram COLORS tab with the heat map, brightness, contrast, background and grid](docs/o-aud-a/colors.png)
+
+**THEME** colors only the controls (buttons, tabs, sliders, panel marks), with a preset
+(O-AT, Phosphor, Sunset, Ocean, Mono, Contrast with Okabe-Ito colors) or an accent of
+your own. **FREEZE** holds the display while the measurements continue. The settings,
+the layout and the selected page are stored with the session.
+
+In the overview, the **VIEWS** button at the right end of the tabs opens a panel that
+shows or hides each view; its **RESET LAYOUT** restores the default arrangement. Drag
+a view's title onto another view to move it beside, above or below that view, and drag
+the gaps between views to resize them.
+
+![VIEWS panel with a switch per view and RESET LAYOUT](docs/o-aud-a/views.png)
 
 The audio thread only copies samples into a lock-free ring. A worker thread measures
 them: loudness and stereo meters all the time, so integrated loudness keeps counting
@@ -281,10 +318,12 @@ cargo xtask bundle o-aud-a --release
 ```
 
 ```bash
-cargo run --release -p o-aud-a --features standalone --bin o-aud-a-standalone -- --backend wasapi
+cargo run --release -p o-aud-a --features standalone --bin o-aud-a-standalone -- --backend wasapi --input-device "In 1-2 (Your Interface)"
 ```
 
-The standalone application analyzes an input device and outputs silence.
+The standalone application analyzes the input device named by `--input-device` (without
+it, no input is connected; an unknown name lists the available devices) and outputs
+silence.
 
 ## Built on
 

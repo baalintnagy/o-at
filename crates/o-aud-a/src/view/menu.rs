@@ -1,5 +1,5 @@
 //! Popups: the THEME panel for the controls and the shared diagram background and grid,
-//! and each view's popup, opened by its settings button or a right click, with a
+//! the overview's VIEWS panel, and each view's popup, opened by its settings button or a right click, with a
 //! SETTINGS tab for what the view shows and a COLORS tab for how it is colored.
 
 use aud_ui::theme::{PANEL, TEXT, TEXT_DIM, TEXT_FAINT, stroke};
@@ -10,7 +10,7 @@ use egui::{
     Pos2, Rect, RichText, Sense, Slider, Ui, vec2,
 };
 
-use crate::layout::Module;
+use crate::layout::{Module, OverviewLayout};
 use crate::settings::{
     AnalyzerSettings, Choice, ColorMap, ColorScheme, LEVEL_RANGE_DB, Lanes, Range,
     SonogramSettings, SpectralSettings, SpectrumSettings, SurfaceSettings, Taper,
@@ -687,6 +687,81 @@ pub fn theme_panel(
         settings.styles = ViewStyles::default();
     }
     !should_close(context, response.rect, Some(button))
+}
+
+/// The overview's VIEWS panel below its button: shows or hides each view and resets the
+/// layout. Returns `false` when it closed.
+pub fn views_panel(
+    context: &Context,
+    button_rect: Rect,
+    layout: &mut OverviewLayout,
+    colors: &Colors,
+) -> bool {
+    const BUTTON_WIDTH: f32 = 104.0;
+    const COLUMNS: usize = 2;
+    let id = Id::new("views-panel");
+    let response = Area::new(id)
+        .order(Order::Foreground)
+        .pivot(Align2::RIGHT_TOP)
+        .fixed_pos(button_rect.right_bottom() + vec2(0.0, 8.0))
+        .constrain(true)
+        .show(context, |ui| {
+            frame(colors.accent).show(ui, |ui| {
+                ui.label(RichText::new("VIEWS").size(12.0).color(colors.accent));
+                ui.label(
+                    RichText::new("The views the overview shows")
+                        .size(10.0)
+                        .color(TEXT_DIM),
+                );
+                ui.add_space(6.0);
+                Grid::new((id, "views"))
+                    .num_columns(COLUMNS)
+                    .spacing(vec2(8.0, 6.0))
+                    .show(ui, |ui| {
+                        for (index, module) in Module::ALL.into_iter().enumerate() {
+                            let visible = layout.placement(module).visible;
+                            let (rect, _) = ui.allocate_exact_size(
+                                vec2(BUTTON_WIDTH, CONTROL_HEIGHT),
+                                Sense::hover(),
+                            );
+                            let id = Id::new(("views-toggle", module));
+                            if button(ui, id, rect, module.label(), colors.accent, visible)
+                                .clicked()
+                            {
+                                layout.set_visible(module, !visible);
+                            }
+                            if index % COLUMNS == COLUMNS - 1 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+                ui.add_space(10.0);
+                let (rect, _) = ui.allocate_exact_size(
+                    vec2(BUTTON_WIDTH * COLUMNS as f32 + 8.0, CONTROL_HEIGHT),
+                    Sense::hover(),
+                );
+                if button(
+                    ui,
+                    Id::new("views-reset"),
+                    rect,
+                    "RESET LAYOUT",
+                    colors.accent,
+                    false,
+                )
+                .clicked()
+                {
+                    *layout = OverviewLayout::default();
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("drag a title to move · drag a gap to resize · Esc closes")
+                        .size(10.0)
+                        .color(TEXT_FAINT),
+                );
+            });
+        })
+        .response;
+    !should_close(context, response.rect, Some(button_rect))
 }
 
 #[cfg(test)]

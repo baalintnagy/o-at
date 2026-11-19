@@ -99,8 +99,10 @@ them. Add new parameters with new IDs. The VST3 class IDs and CLAP IDs are equal
 
 Prefer well-tested audio and DSP crates over reimplementing them, but only use what
 demonstrably works in this plugin. Keep NIH-plug pinned to a specific revision and
-update it deliberately, rebuilding and retesting the bundles. Record license changes
-in NOTICE.md.
+update it deliberately, rebuilding and retesting the bundles. Its `nih_plug` crate is
+vendored in `vendor/nih_plug` with fixes to the standalone audio backend and replaces
+the pinned revision through `[patch]`; when updating NIH-plug, follow
+[vendor/README.md](vendor/README.md). Record license changes in NOTICE.md.
 
 # Licensing
 

@@ -1,6 +1,6 @@
 [package]
 name = "o-nec"
-version = "0.4.2"
+version = "0.4.4"
 edition = "2024"
 rust-version = "1.85"
 authors = ["baalintnagy"]
@@ -10,6 +10,12 @@ publish = false
 
 [workspace]
 members = ["xtask", "crates/*"]
+exclude = ["vendor"]
+
+# NIH-plug's `nih_plug` crate at the pinned revision (de42101) with a fix for the
+# standalone audio input; see vendor/README.md. Remove this once upstream has the fix.
+[patch."https://github.com/robbert-vdh/nih-plug.git"]
+nih_plug = { path = "vendor/nih_plug" }
 
 [lib]
 crate-type = ["cdylib", "lib"]

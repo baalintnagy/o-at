@@ -1,7 +1,11 @@
 # O-AUD-A design
 
 O-AUD-A is an analyzer plugin. It passes its audio through unchanged and reports no
-latency; everything it does happens off the audio thread.
+latency; everything it does happens off the audio thread. This document describes how
+it works; the [README](../README.md#o-aud-a) describes its pages and controls, with
+screenshots of each page in [o-aud-a/](o-aud-a/).
+
+![O-AUD-A overview](o-aud-a/overview.png)
 
 ## Threads
 
@@ -67,7 +71,8 @@ Changing CHANNELS restarts the sonogram.
 ## Stereo
 
 Correlation, balance and mid and side levels are exponential averages over 0.3 s,
-updated per sample. Per third-octave band (30 bands), the spectrum FFT gives channel
+updated per sample. The panel gives its space to the diagrams: the meters take three
+rows (mid and side share one) and the side-to-mid ratio is in the header. Per third-octave band (30 bands), the spectrum FFT gives channel
 powers and the real cross power, averaged over 0.25 s; the editor draws each band at
 its pan position with a width of `(1 − correlation) / 2`.
 
@@ -115,7 +120,9 @@ every 100 ms for 10 minutes.
 
 ## Overview and colors
 
-The overview's layout is part of the settings: for each view whether it is shown, its
+The overview fills the page below the tabs; the VIEWS panel, opened from the right end
+of the tab row, shows or hides views and resets the layout. The overview's layout is
+part of the settings: for each view whether it is shown, its
 row (up to four), its position in the row and a width weight, plus a height weight per
 row. Fields are named per view, so a view added later only needs a new field. Moving a
 view rebuilds the rows: dropped on a view's left or right half it joins that row,
@@ -125,7 +132,9 @@ view at least 200 × 140 pixels. A gap within 8 pixels of a gap in the row above
 up with it. Views narrower than 560 or lower than 300 pixels draw
 their compact versions. Panel headers place legends, pills and readouts after the
 title and switch to shorter wordings, or leave a text out, when it would not fit; the
-loudness readouts use one column when two would collide.
+loudness readouts use one column when two would collide. The compact loudness panel
+puts its readouts in a strip above the bars and adds the history when the panel is
+wide enough for both.
 
 Diagram colors live in `style.rs`: a `PlotStyle` with the background and grid shared by
 every diagram, and one style per view with the elements that view draws, for example

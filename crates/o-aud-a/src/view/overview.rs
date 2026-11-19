@@ -7,7 +7,7 @@ use egui::{Align2, CornerRadius, CursorIcon, Id, Pos2, Rect, Sense, StrokeKind, 
 use crate::layout::{DropZone, MIN_WEIGHT, Module, OverviewLayout};
 use crate::settings::AnalyzerSettings;
 use crate::view::colormap::Colors;
-use crate::view::{Actions, GAP, Toolbar, ViewState, draw_module};
+use crate::view::{Actions, GAP, ViewState, draw_module};
 
 /// Smallest module size in logical pixels while resizing.
 const MIN_MODULE_WIDTH: f32 = 200.0;
@@ -133,27 +133,14 @@ pub fn draw(
     colors: &Colors,
 ) -> Actions {
     settings.overview.normalize();
-    let mut toolbar = Toolbar::new(body, colors.accent);
-    for module in Module::ALL {
-        let mut visible = settings.overview.placement(module).visible;
-        let before = visible;
-        toolbar.toggle_sized(ui, module.label(), &mut visible, 78.0);
-        if visible != before {
-            settings.overview.set_visible(module, visible);
-        }
-    }
-    if toolbar.action(ui, "RESET LAYOUT") {
-        settings.overview = OverviewLayout::default();
-    }
-    toolbar.note(ui, "drag a title to move · drag a gap to resize");
-    let area = toolbar.rest(body);
+    let area = body;
 
     let rows = arrange(&settings.overview, area);
     if rows.is_empty() {
         ui.painter().text(
             area.center(),
             Align2::CENTER_CENTER,
-            "Every view is hidden: switch one on above",
+            "Every view is hidden: switch one on under VIEWS",
             font(12.0),
             TEXT_DIM,
         );

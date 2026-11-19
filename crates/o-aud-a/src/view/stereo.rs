@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::{FRAC_PI_4, PI};
 
-use aud_ui::theme::{BORDER, METER_WARN, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{BORDER, METER_WARN, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::{bar_meter, bipolar_meter, panel};
 use egui::{
     Align2, Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Shape, StrokeKind, Ui, pos2, vec2,
@@ -15,7 +15,7 @@ use crate::analysis::stereo::{STEREO_BANDS, stereo_band_hz};
 use crate::settings::{ScopeGain, ScopeMode, StereoSettings};
 use crate::style::StereoStyle;
 use crate::view::colormap::{Colors, rgb};
-use crate::view::plot::{format_hz, grid, grid_strong, plot_background};
+use crate::view::plot::{Header, format_hz, grid, grid_strong, plot_background};
 
 /// Scope frames kept as a fading trail.
 const TRAIL: usize = 4;
@@ -23,6 +23,8 @@ const TRAIL: usize = 4;
 const MAX_GAIN: f32 = 1_000.0;
 /// Automatic gain rise per frame, as a factor.
 const GAIN_RISE: f32 = 1.03;
+/// Spacing of the meter rows, in logical pixels.
+const METER_ROW: f32 = 30.0;
 
 /// Scope state kept between frames.
 pub struct StereoView {
@@ -56,6 +58,12 @@ pub fn draw(
     panel(ui, rect, "STEREO", colors.accent);
     let content = Rect::from_min_max(rect.min + vec2(12.0, 34.0), rect.max - vec2(12.0, 12.0));
     let painter = ui.painter_at(rect);
+    let width = side_to_mid(data);
+    Header::new(&painter, rect, "STEREO").right_text(
+        &[format!("side to mid {width}"), format!("S/M {width}")],
+        mono(10.0),
+        TEXT_DIM,
+    );
     if compact {
         let meters_height = 76.0;
         let scope_side = (content.height() - meters_height - 8.0).min(content.width());
@@ -74,22 +82,23 @@ pub fn draw(
     let scope_side = content.height().min(content.width() * 0.48);
     let scope = Rect::from_min_size(content.min, vec2(scope_side, scope_side));
     draw_scope(&painter, scope, view, data, (settings, style), frozen);
+    // The meters take three compact rows; the band image gets the rest.
     let side = Rect::from_min_max(pos2(scope.right() + 20.0, content.top()), content.max);
-    let meters = Rect::from_min_size(side.min, vec2(side.width(), 150.0));
+    let meters = Rect::from_min_size(side.min, vec2(side.width(), 3.0 * METER_ROW - 8.0));
     draw_meters(ui, meters, data, style, false);
     let image = Rect::from_min_max(
-        pos2(side.left() + 36.0, meters.bottom() + 34.0),
+        pos2(side.left() + 36.0, meters.bottom() + 30.0),
         pos2(side.right(), side.bottom() - 18.0),
     );
     painter.text(
-        pos2(side.left(), meters.bottom() + 16.0),
+        pos2(side.left(), meters.bottom() + 14.0),
         Align2::LEFT_CENTER,
         "IMAGE BY FREQUENCY",
         font(10.0),
         TEXT_DIM,
     );
     painter.text(
-        pos2(side.right(), meters.bottom() + 16.0),
+        pos2(side.right(), meters.bottom() + 14.0),
         Align2::RIGHT_CENTER,
         "position · width · opposite phase",
         font(10.0),
@@ -311,7 +320,7 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, style: &StereoStyle, compa
     } else {
         rgb(style.mid)
     };
-    let row = 36.0;
+    let row = METER_ROW;
     bipolar_meter(
         ui,
         Rect::from_min_size(rect.min, vec2(rect.width(), 22.0)),
@@ -348,39 +357,38 @@ fn draw_meters(ui: &Ui, rect: Rect, data: &Published, style: &StereoStyle, compa
             format!("{db:.1} dB")
         }
     };
+    // Mid and side share the third row.
+    let half = (rect.width() - 16.0) * 0.5;
     bar_meter(
         ui,
-        Rect::from_min_size(rect.min + vec2(0.0, 2.0 * row), vec2(rect.width(), 22.0)),
+        Rect::from_min_size(rect.min + vec2(0.0, 2.0 * row), vec2(half, 22.0)),
         level(stereo.mid_db),
         None,
         rgb(style.mid),
-        "Mid level (RMS)",
+        "Mid (RMS)",
         &text(stereo.mid_db),
     );
     bar_meter(
         ui,
-        Rect::from_min_size(rect.min + vec2(0.0, 3.0 * row), vec2(rect.width(), 22.0)),
+        Rect::from_min_size(rect.min + vec2(half + 16.0, 2.0 * row), vec2(half, 22.0)),
         level(stereo.side_db),
         None,
         rgb(style.side),
-        "Side level (RMS)",
+        "Side (RMS)",
         &text(stereo.side_db),
     );
-    let ratio = stereo.side_db - stereo.mid_db;
-    let width = if stereo.mid_db < -150.0 && stereo.side_db < -150.0 {
+}
+
+/// The side level relative to mid, as text.
+fn side_to_mid(data: &Published) -> String {
+    let stereo = &data.stereo;
+    if stereo.mid_db < -150.0 && stereo.side_db < -150.0 {
         String::from("–")
     } else if stereo.side_db < -150.0 {
         String::from("mono")
     } else {
-        format!("{ratio:+.1} dB")
-    };
-    ui.painter().text(
-        rect.left_bottom() + vec2(0.0, -2.0),
-        Align2::LEFT_BOTTOM,
-        format!("Side to mid  {width}"),
-        mono(11.0),
-        TEXT,
-    );
+        format!("{:+.1} dB", stereo.side_db - stereo.mid_db)
+    }
 }
 
 fn draw_band_image(painter: &Painter, rect: Rect, data: &Published, style: &StereoStyle) {

@@ -1923,7 +1923,6 @@ dependencies = [
 [[package]]
 name = "nih_plug"
 version = "0.0.0"
-source = "git+https://github.com/robbert-vdh/nih-plug.git?rev=de42101#de421011f41a6d10fc8c7a6084e4f4dee0143683"
 dependencies = [
  "anyhow",
  "anymap3",
@@ -1960,7 +1959,6 @@ dependencies = [
 [[package]]
 name = "nih_plug_derive"
 version = "0.1.0"
-source = "git+https://github.com/robbert-vdh/nih-plug.git?rev=de42101#de421011f41a6d10fc8c7a6084e4f4dee0143683"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2133,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-a"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2152,7 +2150,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2165,7 +2163,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx-app"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2179,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-tx"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2193,7 +2191,7 @@ dependencies = [
 
 [[package]]
 name = "o-nec"
-version = "0.4.2"
+version = "0.4.4"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",

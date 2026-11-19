@@ -1,4 +1,4 @@
-//! The O-AUD-A editor: a header with the pages, a toolbar per page and the analyzer views.
+//! The O-AUD-A editor: a header with the pages and the analyzer views.
 
 mod colormap;
 mod loudness;
@@ -11,11 +11,9 @@ mod spectrum;
 mod stereo;
 mod surface;
 
-use aud_ui::theme::{ALERT, BORDER, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{ALERT, BORDER, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, alpha, mono, stroke};
 use aud_ui::widgets::{button, pill, segmented, title};
-use egui::{
-    Align2, Color32, CornerRadius, CursorIcon, Id, Key, Rect, Sense, StrokeKind, Ui, pos2, vec2,
-};
+use egui::{Align2, CornerRadius, CursorIcon, Id, Key, Rect, Sense, StrokeKind, Ui, pos2, vec2};
 
 use crate::analysis::{AnalysisShared, Published};
 use crate::layout::Module;
@@ -36,7 +34,6 @@ const GAP: f32 = 12.0;
 const HEADER_HEIGHT: f32 = 52.0;
 const TAB_HEIGHT: f32 = 26.0;
 const TAB_WIDTH: f32 = 92.0;
-const TOOL_HEIGHT: f32 = 22.0;
 /// Width of the settings button in a panel's header, in logical pixels.
 pub const SETTINGS_BUTTON_WIDTH: f32 = 26.0;
 
@@ -47,6 +44,8 @@ pub struct ViewState {
     data: Published,
     frozen: bool,
     theme_open: bool,
+    /// Whether the overview's VIEWS panel is open.
+    views_open: bool,
     /// The open view popup.
     menu: Option<menu::ViewMenu>,
     /// The tab view popups open with: the one used last.
@@ -89,7 +88,8 @@ pub fn draw(
     set_colors(ui.ctx(), colors);
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
     let header = Rect::from_min_size(inner.min, vec2(inner.width(), HEADER_HEIGHT));
-    let theme_button = draw_header(ui, header, state, &mut settings, (&colors, window));
+    let (theme_button, views_button) =
+        draw_header(ui, header, state, &mut settings, (&colors, window));
     let body = Rect::from_min_max(
         pos2(
             inner.left(),
@@ -98,9 +98,13 @@ pub fn draw(
         pos2(inner.right(), rect.bottom() - MARGIN),
     );
     let mut page = draw_page(ui, body, state, &mut settings, &colors);
-    let popover_open = state.theme_open || state.menu.is_some();
+    let popover_open = state.theme_open || state.views_open || state.menu.is_some();
     if state.theme_open {
         state.theme_open = menu::theme_panel(ui.ctx(), theme_button, &mut settings, &colors);
+    }
+    if state.views_open {
+        state.views_open = settings.tab == Tab::Overview
+            && menu::views_panel(ui.ctx(), views_button, &mut settings.overview, &colors);
     }
     if let Some(open) = state.menu {
         let (still_open, actions) =
@@ -171,14 +175,14 @@ impl Actions {
     }
 }
 
-/// Draws the header and the page tabs; returns the THEME button's rectangle.
+/// Draws the header and the page tabs; returns the THEME and VIEWS buttons' rectangles.
 fn draw_header(
     ui: &mut Ui,
     rect: Rect,
     state: &mut ViewState,
     settings: &mut AnalyzerSettings,
     (colors, window): (&Colors, &WindowState),
-) -> Rect {
+) -> (Rect, Rect) {
     title(ui, rect, "O-AUD-A", "Audio Analyzer", colors.accent);
     let centre_y = rect.center().y;
     let full = Rect::from_min_size(pos2(rect.right() - 96.0, centre_y - 11.0), vec2(96.0, 22.0));
@@ -234,6 +238,7 @@ fn draw_header(
     .clicked()
     {
         state.theme_open = !state.theme_open;
+        state.views_open = false;
         state.menu = None;
     }
     let data = &state.data;
@@ -278,12 +283,37 @@ fn draw_header(
     ) {
         settings.tab = Tab::from_index(index);
     }
+    // The overview's VIEWS button at the right end of the tab row.
+    let views_button = Rect::from_min_size(
+        pos2(rect.right() - 96.0, tabs.center().y - 11.0),
+        vec2(96.0, 22.0),
+    );
+    let line_end = if settings.tab == Tab::Overview {
+        if button(
+            ui,
+            Id::new("views"),
+            views_button,
+            "VIEWS",
+            colors.accent,
+            state.views_open,
+        )
+        .on_hover_text("Show or hide views and reset the layout")
+        .clicked()
+        {
+            state.views_open = !state.views_open;
+            state.theme_open = false;
+            state.menu = None;
+        }
+        views_button.left() - GAP
+    } else {
+        rect.right()
+    };
     ui.painter().hline(
-        (tabs.right() + GAP)..=rect.right(),
+        (tabs.right() + GAP)..=line_end,
         tabs.center().y,
         stroke(1.0, BORDER),
     );
-    theme_button
+    (theme_button, views_button)
 }
 
 /// The view a page shows; `None` for the overview.
@@ -370,6 +400,7 @@ fn draw_module(
             opener: None,
         });
         state.theme_open = false;
+        state.views_open = false;
     }
     let mut actions = Actions::default();
     let styles = &settings.styles;
@@ -465,6 +496,7 @@ fn settings_button(
             opener: Some(rect),
         });
         state.theme_open = false;
+        state.views_open = false;
     }
     let lit = open || response.hovered();
     let painter = ui.painter();
@@ -508,90 +540,4 @@ fn lane_names(sonogram: &SonogramSettings) -> [&'static str; 2] {
         Signal::LABELS[first.index()],
         second.map_or("", |signal| Signal::LABELS[signal.index()]),
     ]
-}
-
-/// Lays out labelled controls from left to right, wrapping into new rows.
-struct Toolbar {
-    rect: Rect,
-    x: f32,
-    y: f32,
-    accent: Color32,
-}
-
-impl Toolbar {
-    const GAP: f32 = 16.0;
-    const ROW: f32 = TOOL_HEIGHT + 8.0;
-
-    fn new(rect: Rect, accent: Color32) -> Self {
-        Self {
-            rect,
-            x: rect.left(),
-            y: rect.top(),
-            accent,
-        }
-    }
-
-    /// Places an item `width` wide, wrapping if needed; returns its rectangle.
-    fn place(&mut self, width: f32) -> Rect {
-        if self.x > self.rect.left() && self.x + width > self.rect.right() {
-            self.x = self.rect.left();
-            self.y += Self::ROW;
-        }
-        let rect = Rect::from_min_size(pos2(self.x, self.y), vec2(width, TOOL_HEIGHT));
-        self.x += width + Self::GAP;
-        rect
-    }
-
-    /// An on/off button `width` wide.
-    fn toggle_sized(&mut self, ui: &mut Ui, label: &str, value: &mut bool, width: f32) {
-        let rect = self.place(width);
-        if button(
-            ui,
-            Id::new(("tool-toggle", label)),
-            rect,
-            label,
-            self.accent,
-            *value,
-        )
-        .clicked()
-        {
-            *value = !*value;
-        }
-    }
-
-    /// A push button; `true` when clicked.
-    fn action(&mut self, ui: &mut Ui, label: &str) -> bool {
-        let rect = self.place(92.0);
-        button(
-            ui,
-            Id::new(("tool-action", label)),
-            rect,
-            label,
-            self.accent,
-            false,
-        )
-        .clicked()
-    }
-
-    /// A dim note after the controls.
-    fn note(&mut self, ui: &Ui, text: &str) {
-        let width = ui
-            .painter()
-            .layout_no_wrap(text.to_owned(), font(10.0), TEXT_FAINT)
-            .size()
-            .x;
-        let rect = self.place(width);
-        ui.painter().text(
-            pos2(rect.left(), rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            font(10.0),
-            TEXT_FAINT,
-        );
-    }
-
-    /// The part of `area` below the toolbar.
-    fn rest(&self, area: Rect) -> Rect {
-        Rect::from_min_max(pos2(area.left(), self.y + Self::ROW + 2.0), area.max)
-    }
 }

@@ -23,6 +23,14 @@ const ABOVE_TARGET_LU: f32 = 9.0;
 const TOLERANCE_LU: f32 = 1.0;
 /// True peaks above this level are flagged, in dBTP.
 const TRUE_PEAK_LIMIT_DB: f32 = -1.0;
+/// Compact layout widths in logical pixels: the bars beside a history, the history's
+/// level scale, and the narrowest history worth drawing.
+const COMPACT_BARS_WIDTH: f32 = 84.0;
+const HISTORY_SCALE_WIDTH: f32 = 30.0;
+const MIN_HISTORY_WIDTH: f32 = 140.0;
+/// Height of the compact readout strip and width of one of its cells.
+const STRIP_HEIGHT: f32 = 44.0;
+const STRIP_CELL_WIDTH: f32 = 84.0;
 
 /// Loudness text in the selected scale.
 fn loudness_text(lufs: f32, settings: &LoudnessSettings) -> String {
@@ -119,20 +127,34 @@ pub fn draw(
     );
     let content = Rect::from_min_max(rect.min + vec2(14.0, 36.0), rect.max - vec2(14.0, 12.0));
     if compact {
-        let readouts = Rect::from_min_max(
-            content.min,
-            pos2(content.left() + content.width() * 0.55, content.bottom()),
-        );
-        draw_readouts(&painter, readouts, reading, (settings, style), true);
-        let meters = Rect::from_min_max(pos2(readouts.right() + 8.0, content.top()), content.max);
-        draw_bars(&painter, meters, reading, (settings, style));
+        // The diagrams come first: a strip of readouts on top, then the bars and, when it
+        // fits, the history.
+        let strip = Rect::from_min_size(content.min, vec2(content.width(), STRIP_HEIGHT));
+        draw_readout_strip(&painter, strip, reading, (settings, style));
+        let below = Rect::from_min_max(pos2(content.left(), strip.bottom() + 8.0), content.max);
+        let with_history =
+            below.width() >= COMPACT_BARS_WIDTH + HISTORY_SCALE_WIDTH + MIN_HISTORY_WIDTH;
+        let bars_width = if with_history {
+            COMPACT_BARS_WIDTH
+        } else {
+            below.width()
+        };
+        let bars = Rect::from_min_size(below.min, vec2(bars_width, below.height()));
+        draw_bars(&painter, bars, reading, (settings, style));
+        if with_history {
+            let history = Rect::from_min_max(
+                pos2(bars.right() + HISTORY_SCALE_WIDTH, below.top() + 4.0),
+                pos2(below.right(), below.bottom() - 14.0),
+            );
+            draw_history(&painter, history, data, (settings, style));
+        }
         return reset;
     }
-    let readouts = Rect::from_min_size(content.min, vec2(300.0, content.height()));
-    draw_readouts(&painter, readouts, reading, (settings, style), false);
+    let readouts = Rect::from_min_size(content.min, vec2(210.0, content.height()));
+    draw_readouts(&painter, readouts, reading, (settings, style));
     let bars = Rect::from_min_size(
         pos2(readouts.right() + 16.0, content.top()),
-        vec2(170.0, content.height()),
+        vec2(150.0, content.height()),
     );
     draw_bars(&painter, bars, reading, (settings, style));
     let history = Rect::from_min_max(
@@ -179,11 +201,10 @@ fn draw_readouts(
     rect: Rect,
     reading: &LoudnessReading,
     (settings, style): (&LoudnessSettings, &LoudnessStyle),
-    compact: bool,
 ) {
     let target = settings.target.lufs();
     let unit = unit(settings);
-    let big = if compact { 30.0 } else { 46.0 };
+    let big = 40.0;
     painter.text(
         rect.left_top(),
         Align2::LEFT_TOP,
@@ -230,77 +251,53 @@ fn draw_readouts(
     } else {
         String::from("–")
     };
-    let cells: Vec<(&str, String, &str, Color32)> = if compact {
-        vec![
-            (
-                "SHORT-TERM",
-                loudness_text(reading.short_term_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            (
-                "MOMENTARY",
-                loudness_text(reading.momentary_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            ("RANGE", format!("{:.1}", reading.range_lu), "LU", TEXT),
-            (
-                "TRUE PEAK",
-                peak_text(true_peak),
-                "dBTP",
-                peak_color(true_peak),
-            ),
-        ]
-    } else {
-        vec![
-            (
-                "SHORT-TERM",
-                loudness_text(reading.short_term_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            (
-                "MOMENTARY",
-                loudness_text(reading.momentary_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            (
-                "SHORT-TERM MAX",
-                loudness_text(reading.short_term_max_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            (
-                "MOMENTARY MAX",
-                loudness_text(reading.momentary_max_lufs, settings),
-                unit,
-                TEXT,
-            ),
-            (
-                "LOUDNESS RANGE",
-                format!("{:.1}", reading.range_lu),
-                "LU",
-                TEXT,
-            ),
-            (
-                "TRUE PEAK MAX",
-                peak_text(true_peak),
-                "dBTP",
-                peak_color(true_peak),
-            ),
-            ("PEAK TO LOUDNESS", plr, "LU", TEXT),
-            (
-                "SAMPLE PEAK MAX",
-                peak_text(reading.sample_peak_max_db[0].max(reading.sample_peak_max_db[1])),
-                "dBFS",
-                TEXT,
-            ),
-        ]
-    };
+    let cells: Vec<(&str, String, &str, Color32)> = vec![
+        (
+            "SHORT-TERM",
+            loudness_text(reading.short_term_lufs, settings),
+            unit,
+            TEXT,
+        ),
+        (
+            "MOMENTARY",
+            loudness_text(reading.momentary_lufs, settings),
+            unit,
+            TEXT,
+        ),
+        (
+            "SHORT-TERM MAX",
+            loudness_text(reading.short_term_max_lufs, settings),
+            unit,
+            TEXT,
+        ),
+        (
+            "MOMENTARY MAX",
+            loudness_text(reading.momentary_max_lufs, settings),
+            unit,
+            TEXT,
+        ),
+        (
+            "LOUDNESS RANGE",
+            format!("{:.1}", reading.range_lu),
+            "LU",
+            TEXT,
+        ),
+        (
+            "TRUE PEAK MAX",
+            peak_text(true_peak),
+            "dBTP",
+            peak_color(true_peak),
+        ),
+        ("PEAK TO LOUDNESS", plr, "LU", TEXT),
+        (
+            "SAMPLE PEAK MAX",
+            peak_text(reading.sample_peak_max_db[0].max(reading.sample_peak_max_db[1])),
+            "dBFS",
+            TEXT,
+        ),
+    ];
     let top = rect.top() + big + 46.0;
-    let value_font = mono(if compact { 16.0 } else { 20.0 });
+    let value_font = mono(20.0);
     // Two columns only if every cell fits half the width, so captions and values never
     // run into the next column.
     let widest = cells
@@ -314,7 +311,7 @@ fn draw_readouts(
         .fold(0.0, f32::max);
     let columns = if 2.0 * widest <= rect.width() { 2 } else { 1 };
     let column_width = rect.width() / columns as f32;
-    let row_height = if compact { 40.0 } else { 50.0 };
+    let row_height = 50.0;
     for (index, (caption, value, unit, color)) in cells.into_iter().enumerate() {
         let position = pos2(
             rect.left() + (index % columns) as f32 * column_width,
@@ -337,6 +334,67 @@ fn draw_readouts(
             unit,
             font(10.0),
             TEXT_FAINT,
+        );
+    }
+}
+
+/// The compact readouts in one strip: integrated loudness and its distance from the target,
+/// then as many of short-term, momentary, range and true peak as fit, in up to two rows.
+fn draw_readout_strip(
+    painter: &Painter,
+    rect: Rect,
+    reading: &LoudnessReading,
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
+) {
+    let target = settings.target.lufs();
+    let color = target_color(reading.integrated_lufs, target, style);
+    let value = painter.text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        loudness_text(reading.integrated_lufs, settings),
+        mono(24.0),
+        color,
+    );
+    painter.text(
+        pos2(value.right() + 4.0, value.bottom() - 4.0),
+        Align2::LEFT_BOTTOM,
+        unit(settings),
+        font(10.0),
+        TEXT_DIM,
+    );
+    let delta = if reading.integrated_lufs.is_finite() {
+        format!("I {:+.1} LU", reading.integrated_lufs - target)
+    } else {
+        String::from("measuring…")
+    };
+    painter.text(
+        pos2(rect.left(), value.bottom() + 2.0),
+        Align2::LEFT_TOP,
+        delta,
+        font(10.0),
+        color,
+    );
+    let true_peak = reading.true_peak_max_db[0].max(reading.true_peak_max_db[1]);
+    let cells = [
+        ("S", loudness_text(reading.short_term_lufs, settings), TEXT),
+        ("M", loudness_text(reading.momentary_lufs, settings), TEXT),
+        ("LRA", format!("{:.1}", reading.range_lu), TEXT),
+        ("TP", peak_text(true_peak), peak_color(true_peak)),
+    ];
+    let left = (rect.left() + 104.0).max(value.right() + 40.0);
+    let columns = (((rect.right() - left) / STRIP_CELL_WIDTH).floor() as usize).min(2);
+    for (index, (caption, text, color)) in cells.into_iter().enumerate().take(columns * 2) {
+        let position = pos2(
+            left + (index % columns) as f32 * STRIP_CELL_WIDTH,
+            rect.top() + 4.0 + (index / columns) as f32 * 20.0,
+        );
+        let caption = painter.text(position, Align2::LEFT_TOP, caption, font(10.0), TEXT_DIM);
+        painter.text(
+            pos2(position.x + 30.0, caption.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            mono(12.0),
+            color,
         );
     }
 }
