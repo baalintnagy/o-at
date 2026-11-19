@@ -19,9 +19,7 @@ use egui::{
 
 use crate::analysis::{AnalysisShared, Published};
 use crate::layout::Module;
-use crate::settings::{
-    AnalyzerSettings, Choice, Lanes, Range, Signal, SonogramSettings, SpectralSettings, Tab,
-};
+use crate::settings::{AnalyzerSettings, Choice, Signal, SonogramSettings, Tab};
 use crate::view::colormap::Colors;
 use crate::view::plot::set_colors;
 use crate::window::WindowState;
@@ -39,13 +37,8 @@ const HEADER_HEIGHT: f32 = 52.0;
 const TAB_HEIGHT: f32 = 26.0;
 const TAB_WIDTH: f32 = 92.0;
 const TOOL_HEIGHT: f32 = 22.0;
-/// Width of a toolbar slider's track.
-const SLIDER_WIDTH: f32 = 110.0;
-
-/// A fraction as a percentage.
-fn percent(fraction: f32) -> String {
-    format!("{:.0} %", fraction * 100.0)
-}
+/// Width of the settings button in a panel's header, in logical pixels.
+pub const SETTINGS_BUTTON_WIDTH: f32 = 26.0;
 
 /// Editor state kept between frames.
 #[derive(Default)]
@@ -54,8 +47,10 @@ pub struct ViewState {
     data: Published,
     frozen: bool,
     theme_open: bool,
-    /// The open right-click color menu.
+    /// The open view popup.
     menu: Option<menu::ViewMenu>,
+    /// The tab view popups open with: the one used last.
+    menu_tab: menu::MenuTab,
     last_dropped: u64,
     overload_s: f32,
     spectrum: spectrum::SpectrumView,
@@ -89,6 +84,7 @@ pub fn draw(
 
     let before = shared.settings();
     let mut settings = before;
+    settings.stereo.upgrade();
     let colors = Colors::new(&settings);
     set_colors(ui.ctx(), colors);
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
@@ -101,15 +97,18 @@ pub fn draw(
         ),
         pos2(inner.right(), rect.bottom() - MARGIN),
     );
-    let page = draw_page(ui, body, state, &mut settings, &colors);
+    let mut page = draw_page(ui, body, state, &mut settings, &colors);
     let popover_open = state.theme_open || state.menu.is_some();
     if state.theme_open {
         state.theme_open = menu::theme_panel(ui.ctx(), theme_button, &mut settings, &colors);
     }
     if let Some(open) = state.menu {
-        if !menu::view_menu(ui.ctx(), open, &mut settings, &colors) {
+        let (still_open, actions) =
+            menu::view_menu(ui.ctx(), open, &mut state.menu_tab, &mut settings, &colors);
+        if !still_open {
             state.menu = None;
         }
+        page = page.or(actions);
     }
     resize_grip(ui, rect, window, &colors);
     let (f11, escape) =
@@ -160,6 +159,16 @@ fn take(data: &mut Published, published: &mut Published) {
 struct Actions {
     reset_loudness: bool,
     reset_peaks: bool,
+}
+
+impl Actions {
+    /// The resets either asks for.
+    fn or(self, other: Self) -> Self {
+        Self {
+            reset_loudness: self.reset_loudness || other.reset_loudness,
+            reset_peaks: self.reset_peaks || other.reset_peaks,
+        }
+    }
 }
 
 /// Draws the header and the page tabs; returns the THEME button's rectangle.
@@ -330,127 +339,10 @@ fn draw_page(
     settings: &mut AnalyzerSettings,
     colors: &Colors,
 ) -> Actions {
-    let Some(module) = page_module(settings.tab) else {
-        return overview::draw(ui, body, state, settings, colors);
-    };
-    let mut toolbar = Toolbar::new(body, colors.accent);
-    let mut actions = Actions::default();
-    match settings.tab {
-        Tab::Overview => {}
-        Tab::Spectrum => {
-            let spectrum = &mut settings.spectrum;
-            toolbar.choice(ui, "FFT", &mut spectrum.fft, 40.0);
-            toolbar.choice(ui, "WINDOW", &mut spectrum.window, 64.0);
-            toolbar.choice(ui, "CHANNELS", &mut spectrum.channels, 50.0);
-            toolbar.choice(ui, "AVERAGE", &mut spectrum.averaging, 42.0);
-            toolbar.choice(ui, "SMOOTH", &mut spectrum.smoothing, 40.0);
-            toolbar.choice(ui, "SLOPE dB/oct", &mut spectrum.slope, 34.0);
-            toolbar.choice(ui, "RANGE", &mut spectrum.range, 52.0);
-            toolbar.choice(ui, "TOP", &mut spectrum.limit, 38.0);
-            toolbar.choice(ui, "SCALE", &mut spectrum.scale, 38.0);
-            toolbar.toggle(ui, "PEAK HOLD", &mut spectrum.peak_hold);
-            actions.reset_peaks = toolbar.action(ui, "RESET PEAKS");
-        }
-        Tab::Sonogram | Tab::Spectral | Tab::Surface => {
-            if settings.tab == Tab::Spectral {
-                let spectral = &mut settings.spectral;
-                toolbar.group(ui, "SONOGRAM LAYER");
-                toolbar.slider(
-                    ui,
-                    "OPACITY",
-                    &mut spectral.sonogram_opacity,
-                    SpectralSettings::OPACITY,
-                    percent,
-                );
-                toolbar.group(ui, "WAVEFORM LAYER");
-                toolbar.slider(
-                    ui,
-                    "OPACITY",
-                    &mut spectral.waveform_opacity,
-                    SpectralSettings::OPACITY,
-                    percent,
-                );
-                toolbar.slider(
-                    ui,
-                    "GAIN",
-                    &mut spectral.waveform_gain_db,
-                    SpectralSettings::WAVEFORM_GAIN_DB,
-                    |db| format!("+{db:.0} dB"),
-                );
-                toolbar.choice(ui, "SCALE", &mut spectral.scale, 36.0);
-                toolbar.break_row();
-            }
-            if settings.tab == Tab::Surface {
-                let surface = &mut settings.surface;
-                toolbar.choice(ui, "MODE", &mut surface.mode, 76.0);
-                toolbar.choice(ui, "BANDS", &mut surface.bands, 36.0);
-                toolbar.choice(ui, "DEPTH", &mut surface.depth, 36.0);
-                toolbar.choice(ui, "RANGE", &mut surface.range, 52.0);
-                toolbar.choice(ui, "FFT", &mut settings.sonogram.fft, 40.0);
-                toolbar.choice(ui, "CHANNELS", &mut settings.sonogram.channels, 50.0);
-                if settings.sonogram.channels == Lanes::Single {
-                    toolbar.choice(ui, "SIGNAL", &mut settings.sonogram.signal, 46.0);
-                }
-            } else {
-                let sonogram = &mut settings.sonogram;
-                toolbar.choice(ui, "FFT", &mut sonogram.fft, 40.0);
-                toolbar.choice(ui, "CHANNELS", &mut sonogram.channels, 50.0);
-                if sonogram.channels == Lanes::Single {
-                    toolbar.choice(ui, "SIGNAL", &mut sonogram.signal, 46.0);
-                }
-                toolbar.choice(ui, "SCALE", &mut sonogram.scale, 38.0);
-                toolbar.choice(ui, "SPEED", &mut sonogram.speed, 44.0);
-                toolbar.choice(ui, "RANGE", &mut sonogram.range, 52.0);
-                toolbar.choice(ui, "TOP", &mut sonogram.limit, 38.0);
-                toolbar.slider(
-                    ui,
-                    "BRIGHTNESS",
-                    &mut sonogram.brightness_db,
-                    SonogramSettings::BRIGHTNESS_DB,
-                    |db| format!("{db:+.0} dB"),
-                );
-                toolbar.slider(
-                    ui,
-                    "CONTRAST",
-                    &mut sonogram.contrast,
-                    SonogramSettings::CONTRAST,
-                    |contrast| format!("{contrast:.2}×"),
-                );
-            }
-            if let Some(heat) = settings.styles.heat_mut(module) {
-                toolbar.choice(ui, "HEAT", &mut heat.map, 56.0);
-            }
-            if settings.tab == Tab::Surface && toolbar.action(ui, "RESET VIEW") {
-                settings.surface.reset_camera();
-            }
-        }
-        Tab::Stereo => {
-            let stereo = &mut settings.stereo;
-            toolbar.choice(ui, "SCOPE", &mut stereo.mode, 52.0);
-            toolbar.choice(ui, "SAMPLES", &mut stereo.samples, 38.0);
-            toolbar.choice(ui, "GAIN", &mut stereo.gain, 56.0);
-            toolbar.choice(ui, "SPECTRUM FFT", &mut settings.spectrum.fft, 40.0);
-        }
-        Tab::Oscilloscope => {
-            let scope = &mut settings.oscilloscope;
-            toolbar.choice(ui, "TIME", &mut scope.span, 34.0);
-            toolbar.choice(ui, "CHANNELS", &mut scope.channels, 50.0);
-            toolbar.choice(ui, "TRIGGER", &mut scope.trigger, 42.0);
-            toolbar.choice(ui, "SOURCE", &mut scope.source, 46.0);
-            toolbar.choice(ui, "ZOOM", &mut scope.zoom, 38.0);
-            toolbar.choice(ui, "LAYOUT", &mut scope.layout, 62.0);
-        }
-        Tab::Loudness => {
-            let loudness = &mut settings.loudness;
-            toolbar.choice(ui, "TARGET LUFS", &mut loudness.target, 44.0);
-            toolbar.choice(ui, "SCALE", &mut loudness.scale, 44.0);
-            toolbar.choice(ui, "HISTORY", &mut loudness.span, 52.0);
-            actions.reset_loudness = toolbar.action(ui, "RESET");
-        }
+    match page_module(settings.tab) {
+        None => overview::draw(ui, body, state, settings, colors),
+        Some(module) => draw_module(ui, body, module, state, settings, (colors, false)),
     }
-    let area = toolbar.rest(body);
-    draw_module(ui, area, module, state, settings, (colors, false));
-    actions
 }
 
 /// Draws one view into `rect`; `compact` leaves out details for small panels.
@@ -461,8 +353,8 @@ fn draw_module(
     state: &mut ViewState,
     settings: &mut AnalyzerSettings,
     (colors, compact): (&Colors, bool),
-) {
-    // A right click on a view opens its color menu there.
+) -> Actions {
+    // A right click on a view opens its popup there.
     let right_click = ui.input(|input| {
         input
             .pointer
@@ -474,9 +366,12 @@ fn draw_module(
         state.menu = Some(menu::ViewMenu {
             module,
             at: pointer,
+            pivot: Align2::LEFT_TOP,
+            opener: None,
         });
         state.theme_open = false;
     }
+    let mut actions = Actions::default();
     let styles = &settings.styles;
     let data = &state.data;
     match module {
@@ -525,14 +420,16 @@ fn draw_module(
             (colors, &styles.oscilloscope),
             state.frozen,
         ),
-        Module::Loudness => loudness::draw(
-            ui,
-            rect,
-            data,
-            &mut settings.loudness,
-            (colors, &styles.loudness),
-            compact,
-        ),
+        Module::Loudness => {
+            actions.reset_loudness = loudness::draw(
+                ui,
+                rect,
+                data,
+                &mut settings.loudness,
+                (colors, &styles.loudness),
+                compact,
+            );
+        }
         Module::Surface => surface::draw(
             ui,
             rect,
@@ -542,6 +439,66 @@ fn draw_module(
             (colors, &styles.surface, lane_names(&settings.sonogram)),
         ),
     }
+    settings_button(ui, rect, module, state, colors);
+    actions
+}
+
+/// The button at the right end of a panel's header that opens and closes its popup.
+fn settings_button(
+    ui: &mut Ui,
+    panel: Rect,
+    module: Module,
+    state: &mut ViewState,
+    colors: &Colors,
+) {
+    let rect = settings_button_rect(panel);
+    let open = state.menu.is_some_and(|menu| menu.module == module);
+    let response = ui
+        .interact(rect, Id::new(("settings-button", module)), Sense::click())
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text("Settings and colors of this view (or right-click it)");
+    if response.clicked() {
+        state.menu = (!open).then_some(menu::ViewMenu {
+            module,
+            at: rect.right_bottom() + vec2(0.0, 6.0),
+            pivot: Align2::RIGHT_TOP,
+            opener: Some(rect),
+        });
+        state.theme_open = false;
+    }
+    let lit = open || response.hovered();
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(4),
+        if open {
+            alpha(colors.accent, 0.22)
+        } else {
+            PANEL
+        },
+        stroke(1.0, if lit { colors.accent } else { BORDER }),
+        StrokeKind::Inside,
+    );
+    // Three slider tracks with their knobs.
+    let color = if lit { colors.accent } else { TEXT_DIM };
+    for (row, knob) in [(-4.0, 0.3), (0.0, 0.7), (4.0, 0.45)] {
+        let y = rect.center().y + row;
+        let x_range = (rect.left() + 6.0)..=(rect.right() - 6.0);
+        painter.hline(x_range.clone(), y, stroke(1.0, alpha(color, 0.7)));
+        let x = x_range.start() + (x_range.end() - x_range.start()) * knob;
+        painter.circle_filled(pos2(x, y), 1.8, color);
+    }
+}
+
+/// Where a panel's settings button is.
+fn settings_button_rect(panel: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(
+            panel.right() - 12.0 - SETTINGS_BUTTON_WIDTH,
+            panel.top() + 8.0,
+        ),
+        vec2(SETTINGS_BUTTON_WIDTH, 18.0),
+    )
 }
 
 /// Names of the sonogram lanes' signals; the second is empty with one lane.
@@ -585,32 +542,6 @@ impl Toolbar {
         rect
     }
 
-    /// Caption and segmented selector for a choice; `segment` is the width per choice.
-    fn choice<C: Choice>(&mut self, ui: &mut Ui, caption: &str, value: &mut C, segment: f32) {
-        let caption_width = ui
-            .painter()
-            .layout_no_wrap(caption.to_owned(), font(10.0), TEXT_DIM)
-            .size()
-            .x;
-        let width = caption_width + 6.0 + segment * C::LABELS.len() as f32;
-        let rect = self.place(width);
-        ui.painter().text(
-            pos2(rect.left(), rect.center().y),
-            Align2::LEFT_CENTER,
-            caption,
-            font(10.0),
-            TEXT_DIM,
-        );
-        let selector = Rect::from_min_max(
-            pos2(rect.left() + caption_width + 6.0, rect.top()),
-            rect.max,
-        );
-        if let Some(index) = segmented(ui, caption, selector, C::LABELS, value.index(), self.accent)
-        {
-            *value = C::from_index(index);
-        }
-    }
-
     /// An on/off button `width` wide.
     fn toggle_sized(&mut self, ui: &mut Ui, label: &str, value: &mut bool, width: f32) {
         let rect = self.place(width);
@@ -628,11 +559,6 @@ impl Toolbar {
         }
     }
 
-    /// An on/off button.
-    fn toggle(&mut self, ui: &mut Ui, label: &str, value: &mut bool) {
-        self.toggle_sized(ui, label, value, 84.0);
-    }
-
     /// A push button; `true` when clicked.
     fn action(&mut self, ui: &mut Ui, label: &str) -> bool {
         let rect = self.place(92.0);
@@ -645,114 +571,6 @@ impl Toolbar {
             false,
         )
         .clicked()
-    }
-
-    /// Starts the next control on a new row.
-    fn break_row(&mut self) {
-        if self.x > self.rect.left() {
-            self.x = self.rect.left();
-            self.y += Self::ROW;
-        }
-    }
-
-    /// A group heading for the controls after it.
-    fn group(&mut self, ui: &Ui, text: &str) {
-        let width = ui
-            .painter()
-            .layout_no_wrap(text.to_owned(), font(10.0), self.accent)
-            .size()
-            .x;
-        let rect = self.place(width);
-        ui.painter().text(
-            pos2(rect.left(), rect.center().y),
-            Align2::LEFT_CENTER,
-            text,
-            font(10.0),
-            self.accent,
-        );
-    }
-
-    /// Caption and horizontal slider: drag or scroll to change, double-click to reset.
-    fn slider(
-        &mut self,
-        ui: &mut Ui,
-        caption: &str,
-        value: &mut f32,
-        range: Range,
-        format: impl Fn(f32) -> String,
-    ) {
-        let caption_width = ui
-            .painter()
-            .layout_no_wrap(caption.to_owned(), font(10.0), TEXT_DIM)
-            .size()
-            .x;
-        let rect = self.place(caption_width + 6.0 + SLIDER_WIDTH);
-        ui.painter().text(
-            pos2(rect.left(), rect.center().y),
-            Align2::LEFT_CENTER,
-            caption,
-            font(10.0),
-            TEXT_DIM,
-        );
-        let track = Rect::from_min_max(
-            pos2(rect.left() + caption_width + 6.0, rect.top()),
-            rect.max,
-        );
-        let id = Id::new((
-            "tool-slider",
-            caption,
-            rect.left() as i32,
-            rect.top() as i32,
-        ));
-        let response = ui
-            .interact(track, id, Sense::click_and_drag())
-            .on_hover_cursor(CursorIcon::ResizeHorizontal)
-            .on_hover_text("Drag or scroll; double-click to reset");
-        if response.double_clicked() {
-            *value = range.default;
-        } else if response.dragged() || response.clicked() {
-            if let Some(pointer) = response.interact_pointer_pos() {
-                *value = range.value((pointer.x - track.left()) / track.width());
-            }
-        } else if response.hovered() {
-            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                *value = range.value(range.position(*value) + scroll.signum() * 0.02);
-            }
-        }
-        *value = range.clamp(*value);
-        let fraction = range.position(*value);
-        let painter = ui.painter();
-        painter.rect(
-            track,
-            CornerRadius::same(4),
-            PANEL,
-            stroke(
-                1.0,
-                if response.hovered() {
-                    self.accent
-                } else {
-                    BORDER
-                },
-            ),
-            StrokeKind::Inside,
-        );
-        let filled = Rect::from_min_max(
-            track.min,
-            pos2(track.left() + track.width() * fraction, track.bottom()),
-        );
-        painter.rect_filled(
-            filled.shrink(2.0),
-            CornerRadius::same(3),
-            alpha(self.accent, 0.3),
-        );
-        painter.text(
-            track.center(),
-            Align2::CENTER_CENTER,
-            format(*value),
-            mono(10.0),
-            TEXT,
-        );
     }
 
     /// A dim note after the controls.

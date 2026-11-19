@@ -4,7 +4,8 @@
 use aud_ui::theme::{BACKGROUND, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
 use egui::{
-    Align2, Color32, CursorIcon, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Ui, pos2, vec2,
+    Align2, Color32, CursorIcon, Id, Mesh, Painter, PointerButton, Pos2, Rect, Sense, Shape, Ui,
+    pos2, vec2,
 };
 
 use crate::analysis::Published;
@@ -24,6 +25,8 @@ const LIGHT: [f32; 3] = [-0.35, 0.85, -0.4];
 const LANE_GAP: f32 = 6.0;
 /// Camera rotation per dragged pixel in degrees.
 const DRAG_DEG_PER_PX: f32 = 0.35;
+/// Zoom per scrolled pixel, as the natural logarithm of the factor.
+const ZOOM_PER_SCROLL_PX: f32 = 0.002;
 
 /// Projects scene points to the screen.
 #[derive(Clone, Copy, Debug)]
@@ -35,12 +38,17 @@ struct Camera {
 }
 
 impl Camera {
-    fn new(settings: &SurfaceSettings, rect: Rect) -> Self {
+    /// The camera of a scene drawn in `rect`, shifted by the pan as a fraction of `plot`.
+    fn new(settings: &SurfaceSettings, rect: Rect, plot: Rect) -> Self {
+        let pan = vec2(
+            settings.pan_x * plot.width(),
+            settings.pan_y * plot.height(),
+        );
         Self {
             yaw: settings.yaw_deg.to_radians().sin_cos(),
             pitch: settings.pitch_deg.to_radians().sin_cos(),
             focal: (rect.width() * 1.05).min(rect.height() * 1.8) * settings.zoom,
-            centre: rect.center() + vec2(0.0, rect.height() * 0.06),
+            centre: rect.center() + vec2(0.0, rect.height() * 0.06) + pan,
         }
     }
 
@@ -90,33 +98,16 @@ pub fn draw(
     plot_background(&painter, plot);
     Header::new(&ui.painter_at(rect), rect, title).right_text(
         &[
-            String::from("drag to rotate · wheel to zoom · double-click to reset"),
-            String::from("drag · wheel · double-click"),
+            String::from(
+                "drag to rotate · shift- or right-drag to move · wheel to zoom · \
+                 double-click to reset",
+            ),
+            String::from("drag · shift-drag · wheel · double-click"),
         ],
         font(10.0),
         TEXT_DIM,
     );
-
-    let response = ui
-        .interact(plot, Id::new("surface-plot"), Sense::click_and_drag())
-        .on_hover_cursor(CursorIcon::Grab);
-    if response.double_clicked() {
-        settings.reset_camera();
-    }
-    if response.dragged() {
-        let delta = response.drag_delta();
-        settings.yaw_deg =
-            (settings.yaw_deg - delta.x * DRAG_DEG_PER_PX + 180.0).rem_euclid(360.0) - 180.0;
-        let (low, high) = SurfaceSettings::PITCH_RANGE_DEG;
-        settings.pitch_deg = (settings.pitch_deg + delta.y * DRAG_DEG_PER_PX).clamp(low, high);
-    }
-    if response.hovered() {
-        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            let (low, high) = SurfaceSettings::ZOOM_RANGE;
-            settings.zoom = (settings.zoom * (1.0 + scroll * 0.002)).clamp(low, high);
-        }
-    }
+    camera_input(ui, plot, settings);
 
     if view.palette.heat() != style.heat {
         view.palette = Palette::new(style.heat);
@@ -132,7 +123,7 @@ pub fn draw(
         );
         return;
     }
-    let floor_db = -settings.range.db();
+    let floor_db = -settings.range;
     let level = |db: f32| ((db - floor_db) / -floor_db).clamp(0.0, 1.0);
 
     match settings.mode {
@@ -144,7 +135,7 @@ pub fn draw(
                 let top = plot.top() + lane as f32 * (height + LANE_GAP);
                 let lane_rect =
                     Rect::from_min_max(pos2(plot.left(), top), pos2(plot.right(), top + height));
-                let camera = Camera::new(settings, lane_rect);
+                let camera = Camera::new(settings, lane_rect, plot);
                 let clipped = painter.with_clip_rect(lane_rect.shrink(1.0));
                 draw_floor(&clipped, &camera);
                 draw_spectrum_lane(&clipped, &camera, view, (surface, lane), settings, &level);
@@ -161,7 +152,7 @@ pub fn draw(
             }
         }
         SurfaceMode::Stereogram => {
-            let camera = Camera::new(settings, plot);
+            let camera = Camera::new(settings, plot, plot);
             let clipped = painter.with_clip_rect(plot.shrink(1.0));
             draw_floor(&clipped, &camera);
             let bands = surface.bands;
@@ -199,6 +190,41 @@ pub fn draw(
         mono(9.0),
         TEXT_FAINT,
     );
+}
+
+/// Moves the camera: a drag rotates the scene with the pointer, a drag with the shift
+/// key or the right or middle button moves it, the wheel (or a pinch) zooms and a
+/// double click resets the view.
+fn camera_input(ui: &mut Ui, plot: Rect, settings: &mut SurfaceSettings) {
+    let response = ui
+        .interact(plot, Id::new("surface-plot"), Sense::click_and_drag())
+        .on_hover_cursor(CursorIcon::Grab);
+    if response.double_clicked() {
+        settings.reset_camera();
+    }
+    let shift = ui.input(|input| input.modifiers.shift);
+    let delta = response.drag_delta();
+    let panning = response.dragged_by(PointerButton::Secondary)
+        || response.dragged_by(PointerButton::Middle)
+        || (shift && response.dragged_by(PointerButton::Primary));
+    if panning {
+        let limit = SurfaceSettings::PAN_LIMIT;
+        settings.pan_x = (settings.pan_x + delta.x / plot.width().max(1.0)).clamp(-limit, limit);
+        settings.pan_y = (settings.pan_y + delta.y / plot.height().max(1.0)).clamp(-limit, limit);
+    } else if response.dragged_by(PointerButton::Primary) {
+        // The scene turns the way the pointer moves.
+        settings.yaw_deg =
+            (settings.yaw_deg + delta.x * DRAG_DEG_PER_PX + 180.0).rem_euclid(360.0) - 180.0;
+        let (low, high) = SurfaceSettings::PITCH_RANGE_DEG;
+        settings.pitch_deg = (settings.pitch_deg - delta.y * DRAG_DEG_PER_PX).clamp(low, high);
+    }
+    if response.hovered() {
+        let (scroll, pinch) = ui.input(|input| (input.smooth_scroll_delta.y, input.zoom_delta()));
+        let factor = pinch * (scroll * ZOOM_PER_SCROLL_PX).exp();
+        if factor != 1.0 {
+            settings.zoom = SurfaceSettings::ZOOM.clamp(settings.zoom * factor);
+        }
+    }
 }
 
 /// One lane's spectrum history as ridges or a shaded surface.

@@ -276,23 +276,20 @@ fn draw_scope(
     let scope_opacity = style.scope.opacity.clamp(0.0, 1.0);
     for (age, points) in view.trail.iter().enumerate() {
         let fade = (age + 1) as f32 / count.max(1) as f32;
-        match settings.mode {
-            ScopeMode::Lines => {
-                let line: Vec<Pos2> = points.iter().map(|point| to_screen(*point)).collect();
-                clipped.add(Shape::line(
-                    line,
-                    stroke(1.0, alpha(scope_color, 0.75 * scope_opacity * fade * fade)),
-                ));
+        if settings.lines {
+            let line: Vec<Pos2> = points.iter().map(|point| to_screen(*point)).collect();
+            clipped.add(Shape::line(
+                line,
+                stroke(1.0, alpha(scope_color, 0.75 * scope_opacity * fade * fade)),
+            ));
+        } else {
+            let color = alpha(scope_color, scope_opacity * fade * fade);
+            let mut mesh = Mesh::default();
+            for point in points {
+                let position = to_screen(*point);
+                mesh.add_colored_rect(Rect::from_center_size(position, vec2(1.6, 1.6)), color);
             }
-            _ => {
-                let color = alpha(scope_color, scope_opacity * fade * fade);
-                let mut mesh = Mesh::default();
-                for point in points {
-                    let position = to_screen(*point);
-                    mesh.add_colored_rect(Rect::from_center_size(position, vec2(1.6, 1.6)), color);
-                }
-                clipped.add(Shape::mesh(mesh));
-            }
+            clipped.add(Shape::mesh(mesh));
         }
     }
     let gain_db = 20.0 * gain.log10();

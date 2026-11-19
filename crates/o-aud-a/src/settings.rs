@@ -4,7 +4,7 @@
 //! field names are part of saved sessions: never rename them. Fields missing from older
 //! sessions take their defaults.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::layout::OverviewLayout;
 use crate::style::{PlotStyle, Rgb, ViewStyles};
@@ -146,18 +146,18 @@ impl Smoothing {
     }
 }
 
-choice! {
-    /// Display tilt around 1 kHz in dB per octave; 3 dB shows pink noise flat.
-    Slope {
-        Flat => "0",
-        Db3 => "3",
-        Db45 => "4.5",
-    } default Flat
+/// Display tilt choices of earlier versions, kept to read their sessions; the tilt is
+/// now continuous ([`SpectrumSettings::slope`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+enum Slope {
+    Flat,
+    Db3,
+    Db45,
 }
 
 impl Slope {
     /// Tilt in dB per octave.
-    pub fn db_per_octave(self) -> f32 {
+    fn db_per_octave(self) -> f32 {
         match self {
             Self::Flat => 0.0,
             Self::Db3 => 3.0,
@@ -222,18 +222,18 @@ impl ChannelMode {
     }
 }
 
-choice! {
-    /// Shown level range in dB.
-    DbRange {
-        R60 => "60 dB",
-        R90 => "90 dB",
-        R120 => "120 dB",
-    } default R90
+/// Level range choices of earlier versions, kept to read their sessions; the range is
+/// now continuous ([`LEVEL_RANGE_DB`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+enum DbRange {
+    R60,
+    R90,
+    R120,
 }
 
 impl DbRange {
     /// Range in dB.
-    pub fn db(self) -> f32 {
+    fn db(self) -> f32 {
         match self {
             Self::R60 => 60.0,
             Self::R90 => 90.0,
@@ -241,6 +241,38 @@ impl DbRange {
         }
     }
 }
+
+/// A continuous setting as stored: a number, or the choice that earlier versions stored.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Stored<T> {
+    Number(f32),
+    Choice(T),
+}
+
+/// Reads a level range in dB, also from a [`DbRange`] variant name.
+fn level_range_db<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    Ok(match Stored::<DbRange>::deserialize(deserializer)? {
+        Stored::Number(db) => LEVEL_RANGE_DB.clamp(db),
+        Stored::Choice(range) => range.db(),
+    })
+}
+
+/// Reads a display tilt in dB per octave, also from a [`Slope`] variant name.
+fn slope_db<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    Ok(match Stored::<Slope>::deserialize(deserializer)? {
+        Stored::Number(db) => SpectrumSettings::SLOPE_DB.clamp(db),
+        Stored::Choice(slope) => slope.db_per_octave(),
+    })
+}
+
+/// Shown level range of the spectrum, sonogram and 3D views in dB.
+pub const LEVEL_RANGE_DB: Range = Range {
+    min: 30.0,
+    max: 150.0,
+    default: 90.0,
+    taper: Taper::Linear,
+};
 
 choice! {
     /// Highest shown frequency: 20 kHz or the Nyquist frequency.
@@ -303,14 +335,23 @@ choice! {
     } default Ember
 }
 
-choice! {
-    /// Stereo scope drawing.
-    ScopeMode {
-        Lines => "LINES",
-        Dots => "DOTS",
-        Polar => "POLAR",
-        Xy => "L / R",
-    } default Dots
+/// Stereo scope diagram: mid and side (a goniometer), polar, or left against right.
+/// Lines or dots are a separate setting ([`StereoSettings::lines`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScopeMode {
+    /// Earlier versions' goniometer drawn with lines; read as [`Dots`](Self::Dots) with
+    /// lines on (see [`StereoSettings::upgrade`]).
+    Lines,
+    /// The mid and side goniometer.
+    #[default]
+    Dots,
+    Polar,
+    Xy,
+}
+
+impl Choice for ScopeMode {
+    const ALL: &'static [Self] = &[Self::Dots, Self::Polar, Self::Xy];
+    const LABELS: &'static [&'static str] = &["M / S", "POLAR", "L / R"];
 }
 
 choice! {
@@ -665,20 +706,50 @@ impl Default for OscilloscopeSettings {
 }
 
 /// Spectrum analyzer settings.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpectrumSettings {
     pub fft: FftSize,
     pub window: Window,
     pub averaging: Averaging,
     pub smoothing: Smoothing,
-    pub slope: Slope,
+    /// Display tilt around 1 kHz in dB per octave; 3 dB shows pink noise flat.
+    #[serde(deserialize_with = "slope_db")]
+    pub slope: f32,
     pub channels: ChannelMode,
-    pub range: DbRange,
+    /// Shown level range in dB.
+    #[serde(deserialize_with = "level_range_db")]
+    pub range: f32,
     pub limit: FreqLimit,
     pub scale: FreqScale,
     /// Shows the highest level per frequency until reset.
     pub peak_hold: bool,
+}
+
+impl SpectrumSettings {
+    pub const SLOPE_DB: Range = Range {
+        min: 0.0,
+        max: 6.0,
+        default: 0.0,
+        taper: Taper::Linear,
+    };
+}
+
+impl Default for SpectrumSettings {
+    fn default() -> Self {
+        Self {
+            fft: FftSize::default(),
+            window: Window::default(),
+            averaging: Averaging::default(),
+            smoothing: Smoothing::default(),
+            slope: Self::SLOPE_DB.default,
+            channels: ChannelMode::default(),
+            range: LEVEL_RANGE_DB.default,
+            limit: FreqLimit::default(),
+            scale: FreqScale::default(),
+            peak_hold: false,
+        }
+    }
 }
 
 /// Sonogram settings. The 3D spectrum views use the same FFT.
@@ -689,7 +760,9 @@ pub struct SonogramSettings {
     pub signal: Signal,
     pub scale: FreqScale,
     pub speed: Speed,
-    pub range: DbRange,
+    /// Shown level range in dB.
+    #[serde(deserialize_with = "level_range_db")]
+    pub range: f32,
     pub limit: FreqLimit,
     /// One lane of `signal`, or two lanes.
     pub channels: Lanes,
@@ -729,7 +802,7 @@ impl SonogramSettings {
 
     /// Position from 0 (quiet) to 1 (loud) of a level in dB on the color scale.
     pub fn tone(&self, db: f32) -> f32 {
-        let range = self.range.db();
+        let range = self.range;
         let linear = (db + self.brightness_db + range) / range;
         (0.5 + (linear - 0.5) * self.contrast).clamp(0.0, 1.0)
     }
@@ -742,7 +815,7 @@ impl Default for SonogramSettings {
             signal: Signal::Mid,
             scale: FreqScale::Log,
             speed: Speed::S60,
-            range: DbRange::R90,
+            range: LEVEL_RANGE_DB.default,
             limit: FreqLimit::Audible,
             channels: Lanes::Single,
             brightness_db: 0.0,
@@ -758,6 +831,18 @@ pub struct StereoSettings {
     pub mode: ScopeMode,
     pub samples: ScopeSamples,
     pub gain: ScopeGain,
+    /// Joins the scope's samples with lines instead of drawing dots, in every diagram.
+    pub lines: bool,
+}
+
+impl StereoSettings {
+    /// Turns the line mode of earlier versions into the goniometer with lines.
+    pub fn upgrade(&mut self) {
+        if self.mode == ScopeMode::Lines {
+            self.mode = ScopeMode::Dots;
+            self.lines = true;
+        }
+    }
 }
 
 /// Loudness meter settings.
@@ -776,26 +861,41 @@ pub struct SurfaceSettings {
     pub mode: SurfaceMode,
     pub bands: SurfaceBands,
     pub depth: SurfaceDepth,
-    pub range: DbRange,
+    /// Shown level range in dB.
+    #[serde(deserialize_with = "level_range_db")]
+    pub range: f32,
     /// Camera rotation around the vertical axis in degrees.
     pub yaw_deg: f32,
     /// Camera elevation in degrees.
     pub pitch_deg: f32,
     /// Camera zoom factor; one fits the scene.
     pub zoom: f32,
+    /// Horizontal shift of the scene as a fraction of the view's width, right positive.
+    pub pan_x: f32,
+    /// Vertical shift of the scene as a fraction of the view's height, down positive.
+    pub pan_y: f32,
 }
 
 impl SurfaceSettings {
     pub const DEFAULT_YAW_DEG: f32 = -28.0;
     pub const DEFAULT_PITCH_DEG: f32 = 32.0;
     pub const PITCH_RANGE_DEG: (f32, f32) = (4.0, 89.0);
-    pub const ZOOM_RANGE: (f32, f32) = (0.5, 3.0);
+    pub const ZOOM: Range = Range {
+        min: 0.25,
+        max: 8.0,
+        default: 1.0,
+        taper: Taper::Log,
+    };
+    /// Largest shift of the scene as a fraction of the view's size.
+    pub const PAN_LIMIT: f32 = 1.5;
 
     /// Resets the camera to its default view.
     pub fn reset_camera(&mut self) {
         self.yaw_deg = Self::DEFAULT_YAW_DEG;
         self.pitch_deg = Self::DEFAULT_PITCH_DEG;
-        self.zoom = 1.0;
+        self.zoom = Self::ZOOM.default;
+        self.pan_x = 0.0;
+        self.pan_y = 0.0;
     }
 }
 
@@ -805,10 +905,12 @@ impl Default for SurfaceSettings {
             mode: SurfaceMode::default(),
             bands: SurfaceBands::default(),
             depth: SurfaceDepth::default(),
-            range: DbRange::R90,
+            range: LEVEL_RANGE_DB.default,
             yaw_deg: Self::DEFAULT_YAW_DEG,
             pitch_deg: Self::DEFAULT_PITCH_DEG,
-            zoom: 1.0,
+            zoom: Self::ZOOM.default,
+            pan_x: 0.0,
+            pan_y: 0.0,
         }
     }
 }
@@ -839,9 +941,33 @@ pub struct AnalyzerSettings {
 #[cfg(test)]
 mod tests {
     use super::{
-        Choice, FftSize, ScopeSamples, ScopeZoom, SonogramSettings, SpectralSettings, Speed,
-        SurfaceBands, SurfaceDepth, TimeSpan,
+        AnalyzerSettings, Choice, FftSize, ScopeMode, ScopeSamples, ScopeZoom, SonogramSettings,
+        SpectralSettings, Speed, SurfaceBands, SurfaceDepth, TimeSpan,
     };
+
+    #[test]
+    fn sessions_of_earlier_versions_keep_their_ranges_and_scope_lines() {
+        let stored = r#"{
+            "spectrum": { "range": "R120", "slope": "Db45" },
+            "sonogram": { "range": "R60" },
+            "surface": { "range": "R90" },
+            "stereo": { "mode": "Lines" }
+        }"#;
+        let mut settings: AnalyzerSettings = serde_json::from_str(stored).expect("old session");
+        assert_eq!(settings.spectrum.range, 120.0);
+        assert_eq!(settings.spectrum.slope, 4.5);
+        assert_eq!(settings.sonogram.range, 60.0);
+        assert_eq!(settings.surface.range, 90.0);
+        settings.stereo.upgrade();
+        assert_eq!(settings.stereo.mode, ScopeMode::Dots);
+        assert!(settings.stereo.lines);
+
+        settings.spectrum.range = 75.0;
+        settings.spectrum.slope = 1.5;
+        let json = serde_json::to_string(&settings).expect("serializes");
+        let again: AnalyzerSettings = serde_json::from_str(&json).expect("round trip");
+        assert_eq!(again, settings);
+    }
 
     #[test]
     fn sizes_follow_their_labels() {

@@ -7,6 +7,7 @@ use egui::{
 
 use crate::analysis::fft::{BandBins, FLOOR_DB};
 use crate::settings::FreqScale;
+use crate::view::SETTINGS_BUTTON_WIDTH;
 use crate::view::colormap::Colors;
 
 /// Where the editor keeps the frame's colors in the egui context.
@@ -339,13 +340,14 @@ impl<'a> Header<'a> {
     /// Gap between header items in logical pixels.
     const GAP: f32 = 12.0;
 
-    /// The header of the panel `rect` titled `title` (as `aud_ui::widgets::panel` draws it).
+    /// The header of the panel `rect` titled `title` (as `aud_ui::widgets::panel` draws it),
+    /// leaving room for the panel's settings button at the right end.
     pub fn new(painter: &'a Painter, rect: Rect, title: &str) -> Self {
         let title_width = text_width(painter, title, &font(12.0));
         Self {
             painter,
             left: rect.left() + 21.0 + title_width + 16.0,
-            right: rect.right() - 12.0,
+            right: rect.right() - 12.0 - SETTINGS_BUTTON_WIDTH - Self::GAP,
             centre_y: rect.top() + 17.0,
         }
     }

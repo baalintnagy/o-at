@@ -131,8 +131,17 @@ Diagram colors live in `style.rs`: a `PlotStyle` with the background and grid sh
 every diagram, and one style per view with the elements that view draws, for example
 `SpectrumStyle` (curves, fill, peak hold) or `LoudnessStyle` (lines and target colors).
 Colors are stored as RGB with an opacity where one applies; field names are persisted.
-A right click inside a view opens an egui area with that view's entries and the shared
-background and grid; it closes with Esc or a click elsewhere while no picker is open.
+Each view's settings button, or a right click inside the view, opens an egui area
+with two tabs: SETTINGS, the view's options, and COLORS, its entries and the shared
+background and grid. The heat map, brightness and contrast are colors. Choices of kind
+are segmented selectors; ordered choices (FFT length, speed, time span) are stepped
+sliders, and the level ranges and the spectrum slope are continuous: they are stored
+as numbers, and sessions of earlier versions, which stored a choice, are read by
+variant name. The stereo scope's dots or lines are a setting of their own for every
+diagram; the earlier `Lines` mode reads as the goniometer with lines. The popup closes
+with Esc or a click elsewhere while no picker is open. The 3D camera rotates with the
+pointer, moves (`pan_x`, `pan_y`, fractions of the view) with a shift-, right- or
+middle-drag and zooms with the wheel or a pinch.
 The theme (`scheme` and its custom `accent`) only colors controls and panel marks. The
 sonogram and spectral views share their levels but keep one texture each, so each can
 use its own heat map; each texture uploads only the columns written since its last

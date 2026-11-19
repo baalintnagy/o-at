@@ -1,23 +1,28 @@
-//! Color menus: the THEME panel for the controls and the shared diagram background and
-//! grid, and the menu a right click on a diagram opens with that view's colors.
+//! Popups: the THEME panel for the controls and the shared diagram background and grid,
+//! and each view's popup, opened by its settings button or a right click, with a
+//! SETTINGS tab for what the view shows and a COLORS tab for how it is colored.
 
 use aud_ui::theme::{PANEL, TEXT, TEXT_DIM, TEXT_FAINT, stroke};
+use aud_ui::widgets::{button, segmented};
 use egui::color_picker::{Alpha, color_edit_button_srgba};
 use egui::{
-    Area, Color32, ComboBox, Context, CornerRadius, Frame, Grid, Id, Key, Margin, Order, Pos2,
-    Rect, RichText, Slider, Ui, vec2,
+    Align2, Area, Color32, ComboBox, Context, CornerRadius, Frame, Grid, Id, Key, Margin, Order,
+    Pos2, Rect, RichText, Sense, Slider, Ui, vec2,
 };
 
 use crate::layout::Module;
 use crate::settings::{
-    AnalyzerSettings, Choice, ColorMap, ColorScheme, Range, SonogramSettings, SpectralSettings,
-    Taper,
+    AnalyzerSettings, Choice, ColorMap, ColorScheme, LEVEL_RANGE_DB, Lanes, Range,
+    SonogramSettings, SpectralSettings, SpectrumSettings, SurfaceSettings, Taper,
 };
 use crate::style::{HeatStyle, Paint, PlotStyle, Rgb, ViewStyles};
+use crate::view::Actions;
 use crate::view::colormap::{Colors, rgb};
 
 /// Width of the menus' sliders in logical pixels.
 const SLIDER_WIDTH: f32 = 130.0;
+/// Height of the settings tab's selectors and buttons in logical pixels.
+const CONTROL_HEIGHT: f32 = 20.0;
 
 /// Opacity of a paint: logarithmic, so faint values are easy to set.
 const OPACITY: Range = Range {
@@ -27,11 +32,48 @@ const OPACITY: Range = Range {
     taper: Taper::Log,
 };
 
-/// An open right-click menu: the view and where it opened.
+/// Oscilloscope trigger level as a fraction of the half height.
+const TRIGGER_LEVEL: Range = Range {
+    min: -1.0,
+    max: 1.0,
+    default: 0.0,
+    taper: Taper::Linear,
+};
+
+/// Camera rotation around the vertical axis in degrees.
+const YAW_DEG: Range = Range {
+    min: -180.0,
+    max: 180.0,
+    default: SurfaceSettings::DEFAULT_YAW_DEG,
+    taper: Taper::Linear,
+};
+
+/// Camera elevation in degrees.
+const PITCH_DEG: Range = Range {
+    min: SurfaceSettings::PITCH_RANGE_DEG.0,
+    max: SurfaceSettings::PITCH_RANGE_DEG.1,
+    default: SurfaceSettings::DEFAULT_PITCH_DEG,
+    taper: Taper::Linear,
+};
+
+/// The tab a view's popup shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MenuTab {
+    #[default]
+    Settings,
+    Colors,
+}
+
+/// An open view popup: the view, where it opened and the area that opened it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewMenu {
     pub module: Module,
+    /// The popup's corner at `pivot`.
     pub at: Pos2,
+    pub pivot: Align2,
+    /// The button that opened the popup; a press on it does not close the popup, so the
+    /// button can close it itself.
+    pub opener: Option<Rect>,
 }
 
 /// One line of a color menu.
@@ -282,45 +324,294 @@ fn should_close(context: &Context, rect: Rect, keep: Option<Rect>) -> bool {
     })
 }
 
-/// The right-click menu of a view. Returns `false` when it closed.
+/// The controls of a view's SETTINGS tab, laid out as a two-column grid of captions and
+/// controls: segmented selectors for choices of kind, sliders for ranges and steps.
+struct SettingsGrid<'u> {
+    ui: &'u mut Ui,
+    accent: Color32,
+}
+
+impl SettingsGrid<'_> {
+    fn caption(&mut self, text: &str) {
+        self.ui.label(RichText::new(text).color(TEXT));
+    }
+
+    /// A heading above the next rows.
+    fn heading(&mut self, text: &str) {
+        self.ui
+            .label(RichText::new(text).size(10.0).color(TEXT_FAINT));
+        self.ui.end_row();
+    }
+
+    /// A segmented selector; `segment` is the width per choice.
+    fn choice<C: Choice>(&mut self, caption: &str, value: &mut C, segment: f32) {
+        self.caption(caption);
+        let size = vec2(segment * C::LABELS.len() as f32, CONTROL_HEIGHT);
+        let (rect, _) = self.ui.allocate_exact_size(size, Sense::hover());
+        let key = format!("menu-{caption}");
+        if let Some(index) = segmented(self.ui, &key, rect, C::LABELS, value.index(), self.accent) {
+            *value = C::from_index(index);
+        }
+        self.ui.end_row();
+    }
+
+    /// A slider that steps through ordered choices; double-click resets it.
+    fn steps<C: Choice + Default>(&mut self, caption: &str, value: &mut C) {
+        self.caption(caption);
+        let last = C::ALL.len() - 1;
+        let mut index = value.index();
+        let label = move |position: f64| C::LABELS[(position.round().max(0.0) as usize).min(last)];
+        let slider = Slider::new(&mut index, 0..=last)
+            .custom_formatter(move |position, _| label(position).to_owned())
+            .custom_parser(|text| {
+                C::LABELS
+                    .iter()
+                    .position(|candidate| candidate.eq_ignore_ascii_case(text.trim()))
+                    .map(|position| position as f64)
+            });
+        self.ui.spacing_mut().slider_width = SLIDER_WIDTH;
+        if self.ui.add(slider).double_clicked() {
+            index = C::default().index();
+        }
+        *value = C::from_index(index);
+        self.ui.end_row();
+    }
+
+    /// A slider over a continuous `range`; double-click resets it.
+    fn number(&mut self, caption: &str, value: &mut f32, range: Range, format: fn(f32) -> String) {
+        self.caption(caption);
+        amount(self.ui, value, range, format);
+        self.ui.end_row();
+    }
+
+    /// An on/off button.
+    fn toggle(&mut self, caption: &str, value: &mut bool) {
+        self.caption(caption);
+        let (rect, _) = self
+            .ui
+            .allocate_exact_size(vec2(64.0, CONTROL_HEIGHT), Sense::hover());
+        let label = if *value { "ON" } else { "OFF" };
+        let id = Id::new(("menu-toggle", caption));
+        if button(self.ui, id, rect, label, self.accent, *value).clicked() {
+            *value = !*value;
+        }
+        self.ui.end_row();
+    }
+
+    /// A push button after an empty caption; `true` when clicked.
+    fn action(&mut self, label: &str) -> bool {
+        self.caption("");
+        let (rect, _) = self
+            .ui
+            .allocate_exact_size(vec2(150.0, CONTROL_HEIGHT), Sense::hover());
+        let id = Id::new(("menu-action", label));
+        let clicked = button(self.ui, id, rect, label, self.accent, false).clicked();
+        self.ui.end_row();
+        clicked
+    }
+}
+
+fn whole_db(value: f32) -> String {
+    format!("{value:.0} dB")
+}
+
+fn slope(value: f32) -> String {
+    format!("{value:.1} dB/oct")
+}
+
+fn degrees(value: f32) -> String {
+    format!("{value:.0}°")
+}
+
+fn signed_percent(value: f32) -> String {
+    format!("{:+.0} %", value * 100.0)
+}
+
+/// The sonogram's settings, which the spectral view shares.
+fn sonogram_rows(grid: &mut SettingsGrid<'_>, sonogram: &mut SonogramSettings) {
+    grid.steps("FFT length", &mut sonogram.fft);
+    grid.choice("Channels", &mut sonogram.channels, 50.0);
+    if sonogram.channels == Lanes::Single {
+        grid.choice("Signal", &mut sonogram.signal, 46.0);
+    }
+    grid.choice("Frequency scale", &mut sonogram.scale, 38.0);
+    grid.choice("Highest frequency", &mut sonogram.limit, 38.0);
+    grid.steps("Speed", &mut sonogram.speed);
+    grid.number("Level range", &mut sonogram.range, LEVEL_RANGE_DB, whole_db);
+}
+
+/// The SETTINGS tab of `module`'s popup; returns the resets asked for.
+fn settings_tab(
+    grid: &mut SettingsGrid<'_>,
+    module: Module,
+    settings: &mut AnalyzerSettings,
+) -> Actions {
+    let mut actions = Actions::default();
+    match module {
+        Module::Spectrum => {
+            let spectrum = &mut settings.spectrum;
+            grid.steps("FFT length", &mut spectrum.fft);
+            grid.choice("Window", &mut spectrum.window, 64.0);
+            grid.choice("Channels", &mut spectrum.channels, 50.0);
+            grid.choice("Averaging", &mut spectrum.averaging, 42.0);
+            grid.steps("Smoothing", &mut spectrum.smoothing);
+            grid.number(
+                "Slope",
+                &mut spectrum.slope,
+                SpectrumSettings::SLOPE_DB,
+                slope,
+            );
+            grid.number("Level range", &mut spectrum.range, LEVEL_RANGE_DB, whole_db);
+            grid.choice("Frequency scale", &mut spectrum.scale, 38.0);
+            grid.choice("Highest frequency", &mut spectrum.limit, 38.0);
+            grid.toggle("Peak hold", &mut spectrum.peak_hold);
+            actions.reset_peaks = grid.action("RESET PEAKS");
+        }
+        Module::Sonogram => sonogram_rows(grid, &mut settings.sonogram),
+        Module::Spectral => {
+            let spectral = &mut settings.spectral;
+            grid.heading("WAVEFORM LAYER");
+            grid.number(
+                "Gain",
+                &mut spectral.waveform_gain_db,
+                SpectralSettings::WAVEFORM_GAIN_DB,
+                |db| format!("+{db:.0} dB"),
+            );
+            grid.choice("Amplitude scale", &mut spectral.scale, 36.0);
+            grid.heading("SONOGRAM LAYER · shared with the sonogram");
+            sonogram_rows(grid, &mut settings.sonogram);
+        }
+        Module::Surface => {
+            let surface = &mut settings.surface;
+            grid.choice("Mode", &mut surface.mode, 76.0);
+            grid.steps("Bands", &mut surface.bands);
+            grid.steps("History rows", &mut surface.depth);
+            grid.number("Level range", &mut surface.range, LEVEL_RANGE_DB, whole_db);
+            grid.heading("ANALYSIS · shared with the sonogram");
+            let sonogram = &mut settings.sonogram;
+            grid.steps("FFT length", &mut sonogram.fft);
+            grid.choice("Channels", &mut sonogram.channels, 50.0);
+            if sonogram.channels == Lanes::Single {
+                grid.choice("Signal", &mut sonogram.signal, 46.0);
+            }
+            grid.heading("CAMERA");
+            grid.number("Rotation", &mut surface.yaw_deg, YAW_DEG, degrees);
+            grid.number("Elevation", &mut surface.pitch_deg, PITCH_DEG, degrees);
+            grid.number("Zoom", &mut surface.zoom, SurfaceSettings::ZOOM, factor);
+            if grid.action("RESET VIEW") {
+                surface.reset_camera();
+            }
+        }
+        Module::Stereo => {
+            let stereo = &mut settings.stereo;
+            grid.choice("Diagram", &mut stereo.mode, 52.0);
+            grid.toggle("Lines", &mut stereo.lines);
+            grid.steps("Samples", &mut stereo.samples);
+            grid.choice("Gain", &mut stereo.gain, 56.0);
+            grid.steps("Band FFT length", &mut settings.spectrum.fft);
+        }
+        Module::Oscilloscope => {
+            let scope = &mut settings.oscilloscope;
+            grid.steps("Time span", &mut scope.span);
+            grid.choice("Channels", &mut scope.channels, 50.0);
+            grid.choice("Layout", &mut scope.layout, 62.0);
+            grid.steps("Zoom", &mut scope.zoom);
+            grid.choice("Trigger", &mut scope.trigger, 42.0);
+            grid.choice("Trigger source", &mut scope.source, 46.0);
+            grid.number(
+                "Trigger level",
+                &mut scope.level,
+                TRIGGER_LEVEL,
+                signed_percent,
+            );
+        }
+        Module::Loudness => {
+            let loudness = &mut settings.loudness;
+            grid.choice("Target LUFS", &mut loudness.target, 44.0);
+            grid.choice("Readouts", &mut loudness.scale, 44.0);
+            grid.steps("History", &mut loudness.span);
+            actions.reset_loudness = grid.action("RESET MEASUREMENT");
+        }
+    }
+    actions
+}
+
+/// A view's popup with its SETTINGS and COLORS tabs. Returns whether it is still open
+/// and the resets asked for.
 pub fn view_menu(
     context: &Context,
     menu: ViewMenu,
+    tab: &mut MenuTab,
     settings: &mut AnalyzerSettings,
     colors: &Colors,
-) -> bool {
+) -> (bool, Actions) {
     let id = Id::new(("view-menu", menu.module));
-    let mut reset = false;
+    let mut reset_colors = false;
+    let mut actions = Actions::default();
     let response = Area::new(id)
         .order(Order::Foreground)
+        .pivot(menu.pivot)
         .fixed_pos(menu.at)
         .constrain(true)
         .show(context, |ui| {
             frame(colors.accent).show(ui, |ui| {
-                ui.set_max_width(420.0);
-                ui.label(
-                    RichText::new(format!("{} COLORS", menu.module.label()))
-                        .size(12.0)
-                        .color(colors.accent),
-                );
-                ui.add_space(6.0);
-                draw_entries(ui, id, entries(menu.module, settings));
-                ui.add_space(8.0);
+                ui.set_max_width(460.0);
                 ui.horizontal(|ui| {
-                    reset = ui.button("Reset this view's colors").clicked();
                     ui.label(
-                        RichText::new("double-click a slider to reset it")
-                            .size(10.0)
-                            .color(TEXT_FAINT),
+                        RichText::new(menu.module.label())
+                            .size(12.0)
+                            .color(colors.accent),
                     );
+                    ui.add_space(16.0);
+                    let (rect, _) = ui.allocate_exact_size(vec2(180.0, 22.0), Sense::hover());
+                    if let Some(index) = segmented(
+                        ui,
+                        "view-menu-tab",
+                        rect,
+                        &["SETTINGS", "COLORS"],
+                        usize::from(*tab == MenuTab::Colors),
+                        colors.accent,
+                    ) {
+                        *tab = if index == 0 {
+                            MenuTab::Settings
+                        } else {
+                            MenuTab::Colors
+                        };
+                    }
                 });
+                ui.add_space(8.0);
+                match tab {
+                    MenuTab::Settings => {
+                        Grid::new((id, "settings"))
+                            .num_columns(2)
+                            .spacing(vec2(12.0, 6.0))
+                            .show(ui, |ui| {
+                                let mut grid = SettingsGrid {
+                                    ui,
+                                    accent: colors.accent,
+                                };
+                                actions = settings_tab(&mut grid, menu.module, settings);
+                            });
+                    }
+                    MenuTab::Colors => {
+                        draw_entries(ui, id, entries(menu.module, settings));
+                        ui.add_space(8.0);
+                        reset_colors = ui.button("Reset this view's colors").clicked();
+                    }
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("double-click a slider to reset it · Esc closes")
+                        .size(10.0)
+                        .color(TEXT_FAINT),
+                );
             });
         })
         .response;
-    if reset {
+    if reset_colors {
         settings.styles.reset(menu.module);
     }
-    !should_close(context, response.rect, None)
+    (!should_close(context, response.rect, menu.opener), actions)
 }
 
 /// The THEME panel below its button. Returns `false` when it closed.

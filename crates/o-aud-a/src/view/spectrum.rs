@@ -111,17 +111,13 @@ pub fn draw(
         high_hz: settings.limit.high_hz(data.sample_rate as f32),
         scale: settings.scale,
     };
-    let floor = TOP_DB - settings.range.db();
+    let floor = TOP_DB - settings.range;
     freq_grid_vertical(&painter, plot, axis, true);
     level_grid(
         &painter,
         plot,
         (floor, TOP_DB),
-        if settings.range.db() > 90.0 {
-            20.0
-        } else {
-            12.0
-        },
+        if settings.range > 90.0 { 20.0 } else { 12.0 },
     );
 
     let width = plot.width().max(1.0) as usize;
@@ -130,7 +126,7 @@ pub fn draw(
         axis,
         spectrum.primary_db.len(),
         spectrum.bin_hz,
-        settings.slope.db_per_octave(),
+        settings.slope,
     );
     let (primary_color, secondary_color) = curve_colors(settings.channels, style);
     let y_of = |db: f32| {

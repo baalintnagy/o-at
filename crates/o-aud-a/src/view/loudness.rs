@@ -4,8 +4,10 @@ use aud_ui::theme::{
     ALERT, BORDER, METER_WARN, PANEL_RAISED, TEXT, TEXT_DIM, TEXT_FAINT, TRACK, alpha, font, mono,
     stroke,
 };
-use aud_ui::widgets::panel;
-use egui::{Align2, Color32, CornerRadius, Painter, Pos2, Rect, Shape, StrokeKind, Ui, pos2, vec2};
+use aud_ui::widgets::{button, panel};
+use egui::{
+    Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Shape, StrokeKind, Ui, pos2, vec2,
+};
 
 use crate::analysis::loudness::LoudnessReading;
 use crate::analysis::{Published, history_entries};
@@ -75,7 +77,7 @@ fn duration_text(seconds: f32) -> String {
     }
 }
 
-/// Draws the loudness panel.
+/// Draws the loudness panel. Returns `true` when its RESET button was clicked.
 pub fn draw(
     ui: &mut Ui,
     rect: Rect,
@@ -83,13 +85,26 @@ pub fn draw(
     settings: &mut LoudnessSettings,
     (colors, style): (&Colors, &LoudnessStyle),
     compact: bool,
-) {
+) -> bool {
     panel(ui, rect, "LOUDNESS", colors.accent);
     let painter = ui.painter_at(rect);
     let reading = &data.loudness;
     let target = settings.target.lufs();
     let duration = duration_text(reading.duration_s);
-    Header::new(&painter, rect, "LOUDNESS").right_text(
+    let mut header = Header::new(&painter, rect, "LOUDNESS");
+    let reset = header.right_slot(52.0, 18.0).is_some_and(|slot| {
+        button(
+            ui,
+            Id::new("loudness-reset"),
+            slot,
+            "RESET",
+            colors.accent,
+            false,
+        )
+        .on_hover_text("Restart the integrated loudness, range, maxima and history")
+        .clicked()
+    });
+    header.right_text(
         &[
             format!(
                 "target {target:.0} LUFS · {} · {duration}",
@@ -111,7 +126,7 @@ pub fn draw(
         draw_readouts(&painter, readouts, reading, (settings, style), true);
         let meters = Rect::from_min_max(pos2(readouts.right() + 8.0, content.top()), content.max);
         draw_bars(&painter, meters, reading, (settings, style));
-        return;
+        return reset;
     }
     let readouts = Rect::from_min_size(content.min, vec2(300.0, content.height()));
     draw_readouts(&painter, readouts, reading, (settings, style), false);
@@ -156,6 +171,7 @@ pub fn draw(
         pos2(content.right(), content.bottom()),
     );
     draw_true_peaks(&painter, peaks, reading, style);
+    reset
 }
 
 fn draw_readouts(

@@ -159,16 +159,17 @@ pub fn draw(
         );
         return Actions::default();
     }
+    let mut actions = Actions::default();
     for cell in rows.iter().flatten() {
         let compact = cell.rect.width() < COMPACT_WIDTH || cell.rect.height() < COMPACT_HEIGHT;
-        draw_module(
+        actions = actions.or(draw_module(
             ui,
             cell.rect,
             cell.module,
             state,
             settings,
             (colors, compact),
-        );
+        ));
     }
     resize_handles(ui, &rows, area, &mut settings.overview, colors);
     move_handles(
@@ -178,7 +179,7 @@ pub fn draw(
         &mut settings.overview,
         colors,
     );
-    Actions::default()
+    actions
 }
 
 /// Drag handles in the gaps between modules and between rows.
