@@ -1,5 +1,6 @@
 //! The oscilloscope: waveforms over a selectable time span, triggered on a level
-//! crossing with sub-sample alignment, so periodic signals stand still.
+//! crossing with sub-sample alignment, so periodic signals stand still. Several shown
+//! signals are overlaid in their colors, each triggered on its own audio.
 
 use std::ops::Range;
 
@@ -9,22 +10,21 @@ use egui::{
     Align2, Color32, CursorIcon, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Ui, pos2, vec2,
 };
 
-use crate::analysis::{ENVELOPE_BUCKET_S, ENVELOPE_LEN, EnvelopeBucket, Published};
+use crate::analysis::{ENVELOPE_BUCKET_S, ENVELOPE_LEN, EnvelopeBucket, SignalReading};
 use crate::settings::{
     ChannelMode, Choice, OscilloscopeSettings, ScopeLayout, Signal, TriggerMode,
 };
 use crate::style::ScopeStyle;
-use crate::view::colormap::{Colors, paint};
-use crate::view::plot::{Header, grid, grid_strong, plot_background, tooltip};
+use crate::view::colormap::{Colors, lighten, paint};
+use crate::view::plot::{
+    Header, follow_gain, grid, grid_strong, message, plot_background, tooltip,
+};
+use crate::view::sources::{NO_SIGNALS, Trace, name_traces};
 
 /// Share of the span shown before the trigger point.
 const PRE_TRIGGER: f32 = 0.1;
 /// Trigger hysteresis as a share of the screen's half height.
 const HYSTERESIS: f32 = 0.02;
-/// Highest automatic gain.
-const MAX_GAIN: f32 = 1_000.0;
-/// Automatic gain rise per frame, as a factor.
-const GAIN_RISE: f32 = 1.03;
 /// Horizontal and vertical grid divisions per lane.
 const DIVISIONS_X: usize = 10;
 const DIVISIONS_Y: usize = 8;
@@ -123,7 +123,7 @@ impl Default for OscilloscopeView {
 
 impl OscilloscopeView {
     /// Takes the new envelope buckets out of `data`.
-    pub fn take_envelope(&mut self, data: &mut Published) {
+    pub fn take_envelope(&mut self, data: &mut SignalReading) {
         if data.envelope_generation != self.envelope_generation {
             self.envelope_generation = data.envelope_generation;
             self.head = 0;
@@ -151,35 +151,91 @@ impl OscilloscopeView {
     }
 }
 
-fn trace_colors(mode: ChannelMode, style: &ScopeStyle) -> [(Signal, &'static str, Color32); 2] {
+/// A signal's traces: what they show, their label and color.
+type Lines = [(Signal, &'static str, Color32); 2];
+
+fn trace_colors(mode: ChannelMode, style: &ScopeStyle) -> Lines {
     let (primary, secondary) = mode.signals();
     let secondary_color = paint(if mode == ChannelMode::MidSide {
         style.side
     } else {
         style.right
     });
-    let label = |signal: Signal| match signal {
-        Signal::Mid => "MID",
-        Signal::Side => "SIDE",
-        Signal::Left => "LEFT",
-        Signal::Right => "RIGHT",
-    };
     [
-        (primary, label(primary), paint(style.first)),
+        (primary, signal_label(primary), paint(style.first)),
         (
             secondary.unwrap_or(primary),
-            secondary.map_or("", label),
+            secondary.map_or("", signal_label),
             secondary_color,
         ),
     ]
 }
 
-/// Draws the oscilloscope panel.
+fn signal_label(signal: Signal) -> &'static str {
+    match signal {
+        Signal::Mid => "MID",
+        Signal::Side => "SIDE",
+        Signal::Left => "LEFT",
+        Signal::Right => "RIGHT",
+    }
+}
+
+/// The lines of `trace`: in the style's colors alone, in the signal's color (lighter for
+/// the second) when overlaid.
+fn lines_of(trace: &Trace<'_>, overlay: bool, mode: ChannelMode, style: &ScopeStyle) -> Lines {
+    let mut lines = trace_colors(mode, style);
+    if overlay {
+        lines[0].2 = trace.color;
+        lines[1].2 = lighten(trace.color, 0.4);
+    }
+    lines
+}
+
+/// The shared gain after a frame whose loudest sample is `peak`: the zoom, or the
+/// automatic gain that fills 90 % of the height.
+fn next_gain(gain: f32, peak: f32, settings: &OscilloscopeSettings) -> f32 {
+    settings
+        .zoom
+        .factor()
+        .unwrap_or_else(|| follow_gain(gain, peak, 0.9))
+}
+
+/// Where one signal's frames are shown: its rate, the frames, the span and the frames
+/// before the trigger.
+#[derive(Clone, Copy)]
+struct Window {
+    rate: f32,
+    len: usize,
+    wanted: usize,
+    span: usize,
+    pre: usize,
+}
+
+impl Window {
+    fn of(signal: &SignalReading, settings: &OscilloscopeSettings) -> Option<Self> {
+        let rate = signal.sample_rate as f32;
+        let len = signal.scope.len();
+        if rate <= 0.0 || len < 16 {
+            return None;
+        }
+        let wanted = (settings.span.seconds() * rate).round() as usize;
+        let span = wanted.clamp(8, len - 2);
+        Some(Self {
+            rate,
+            len,
+            wanted,
+            span,
+            pre: (span as f32 * PRE_TRIGGER) as usize,
+        })
+    }
+}
+
+/// Draws the oscilloscope panel of `traces`, each with its view; `sequence` tells new
+/// data from a repeated frame.
 pub fn draw(
     ui: &mut Ui,
     rect: Rect,
-    view: &mut OscilloscopeView,
-    data: &Published,
+    (views, traces, sequence): (&mut [&mut OscilloscopeView], &[Trace<'_>], u64),
     settings: &mut OscilloscopeSettings,
     (colors, style): (&Colors, &ScopeStyle),
     frozen: bool,
@@ -191,81 +247,86 @@ pub fn draw(
     );
     let painter = ui.painter_at(rect);
     plot_background(&painter, plot);
+    if traces.is_empty() {
+        message(&painter, plot, NO_SIGNALS);
+        return;
+    }
     if settings.span.is_roll() {
-        draw_roll(ui, (rect, plot), view, settings, style, frozen);
+        draw_roll(ui, (rect, plot), (views, traces), settings, style, frozen);
         return;
     }
-    let frames = &data.scope;
-    let rate = data.sample_rate as f32;
-    if rate <= 0.0 || frames.len() < 16 {
-        painter.text(
-            plot.center(),
-            Align2::CENTER_CENTER,
-            "Waiting for audio",
-            font(12.0),
-            TEXT_DIM,
-        );
+    let windows: Vec<Option<Window>> = traces
+        .iter()
+        .map(|trace| Window::of(trace.signal, settings))
+        .collect();
+    let Some((first_index, first)) = windows
+        .iter()
+        .enumerate()
+        .find_map(|(index, window)| window.map(|window| (index, window)))
+    else {
+        message(&painter, plot, traces[0].waiting_text());
         return;
-    }
-    let len = frames.len();
-    let wanted = (settings.span.seconds() * rate).round() as usize;
-    let span = wanted.clamp(8, len - 2);
-    let pre = (span as f32 * PRE_TRIGGER) as usize;
-    let traces = trace_colors(settings.channels, style);
+    };
+    let overlay = traces.len() > 1;
     let shown = if settings.channels.signals().1.is_some() {
         2
     } else {
         1
     };
+    let lines: Vec<Lines> = traces
+        .iter()
+        .map(|trace| lines_of(trace, overlay, settings.channels, style))
+        .collect();
 
-    if !frozen && data.sequence != view.last_sequence {
-        view.last_sequence = data.sequence;
-        let window = &frames[len.saturating_sub(2 * span)..];
-        let peak = window
+    if !frozen && views[first_index].last_sequence != sequence {
+        // The gain is shared; each signal has its own trigger.
+        let peak = traces
             .iter()
-            .flat_map(|frame| {
-                traces[..shown]
+            .zip(&windows)
+            .zip(&lines)
+            .filter_map(|((trace, window), lines)| window.map(|window| (trace, window, lines)))
+            .map(|(trace, window, lines)| {
+                let frames = &trace.signal.scope;
+                frames[window.len.saturating_sub(2 * window.span)..]
                     .iter()
-                    .map(|(signal, _, _)| value(*frame, *signal).abs())
+                    .flat_map(|frame| {
+                        lines[..shown]
+                            .iter()
+                            .map(|(signal, _, _)| value(*frame, *signal).abs())
+                    })
+                    .fold(0.0, f32::max)
             })
             .fold(0.0, f32::max);
-        view.gain = match settings.zoom.factor() {
-            Some(factor) => factor,
-            None => {
-                let target = if peak > 1e-6 {
-                    (0.9 / peak).clamp(1.0, MAX_GAIN)
-                } else {
-                    view.gain
-                };
-                if target < view.gain {
-                    target
-                } else {
-                    (view.gain * GAIN_RISE).min(target)
-                }
-            }
-        };
-        view.trigger = match settings.trigger {
-            TriggerMode::Free => None,
-            mode => find_trigger(
-                frames.iter().map(|frame| value(*frame, settings.source)),
-                (pre + 1, len - 1 - (span - pre)),
-                settings.level / view.gain,
-                HYSTERESIS / view.gain,
-                mode == TriggerMode::Rising,
-            ),
-        };
-        view.start = view.trigger.map_or((len - 1 - span) as f32, |trigger| {
-            trigger.position - pre as f32
-        });
+        let gain = next_gain(views[first_index].gain, peak, settings);
+        for ((view, trace), window) in views.iter_mut().zip(traces).zip(&windows) {
+            view.last_sequence = sequence;
+            view.gain = gain;
+            let Some(Window { len, span, pre, .. }) = *window else {
+                continue;
+            };
+            let frames = &trace.signal.scope;
+            view.trigger = match settings.trigger {
+                TriggerMode::Free => None,
+                mode => find_trigger(
+                    frames.iter().map(|frame| value(*frame, settings.source)),
+                    (pre + 1, len - 1 - (span - pre)),
+                    settings.level / gain,
+                    HYSTERESIS / gain,
+                    mode == TriggerMode::Rising,
+                ),
+            };
+            view.start = view.trigger.map_or((len - 1 - span) as f32, |trigger| {
+                trigger.position - pre as f32
+            });
+        }
     }
 
     let lanes = lanes(plot, settings.layout, shown);
-    let gain = view.gain;
+    let gain = views[first_index].gain;
     for lane in &lanes {
         draw_grid(&painter, *lane, gain);
     }
-    let x_of = |index: f32| plot.left() + plot.width() * (index - view.start) / span as f32;
-    let trigger_x = x_of(view.start + pre as f32);
+    let trigger_x = plot.left() + plot.width() * first.pre as f32 / first.span as f32;
     if settings.trigger != TriggerMode::Free {
         painter.add(Shape::dashed_line(
             &[pos2(trigger_x, plot.top()), pos2(trigger_x, plot.bottom())],
@@ -276,53 +337,66 @@ pub fn draw(
     }
 
     let clipped = painter.with_clip_rect(plot.shrink(1.0));
-    for (trace, (signal, _, color)) in traces[..shown].iter().enumerate().rev() {
-        let lane = lanes[trace.min(lanes.len() - 1)];
-        let y_of = |sample: f32| lane.center().y - sample * gain * lane.height() * 0.5;
-        let first = view.start.floor().max(0.0) as usize;
-        let last = ((view.start + span as f32).ceil() as usize + 1).min(len - 1);
-        let width = plot.width().max(1.0);
-        if (last - first) as f32 > 2.0 * width {
-            // Dense: the extent of each pixel column.
-            let mut mesh = Mesh::default();
-            let per_column = (last - first) as f32 / width;
-            let mut previous: Option<(f32, f32)> = None;
-            for column in 0..width as usize {
-                let from = first + (column as f32 * per_column) as usize;
-                let to = (first + ((column + 1) as f32 * per_column) as usize).min(last);
-                let (mut low, mut high) = frames[from..=to]
-                    .iter()
-                    .map(|frame| value(*frame, *signal))
-                    .fold((f32::MAX, f32::MIN), |(low, high), v| {
-                        (low.min(v), high.max(v))
-                    });
-                if let Some((previous_low, previous_high)) = previous {
-                    low = low.min(previous_high);
-                    high = high.max(previous_low);
+    let width = plot.width().max(1.0);
+    for ((view, trace), (window, lines)) in views
+        .iter_mut()
+        .zip(traces)
+        .zip(windows.iter().zip(&lines))
+        .rev()
+    {
+        let Some(Window { len, span, .. }) = *window else {
+            continue;
+        };
+        let frames = &trace.signal.scope;
+        let start = view.start;
+        let x_of = |index: f32| plot.left() + plot.width() * (index - start) / span as f32;
+        for (line, (signal, _, color)) in lines[..shown].iter().enumerate().rev() {
+            let lane = lanes[line.min(lanes.len() - 1)];
+            let y_of = |sample: f32| lane.center().y - sample * gain * lane.height() * 0.5;
+            let first = start.floor().max(0.0) as usize;
+            let last = ((start + span as f32).ceil() as usize + 1).min(len - 1);
+            if (last - first) as f32 > 2.0 * width {
+                // Dense: the extent of each pixel column.
+                let mut mesh = Mesh::default();
+                let per_column = (last - first) as f32 / width;
+                let mut previous: Option<(f32, f32)> = None;
+                for column in 0..width as usize {
+                    let from = first + (column as f32 * per_column) as usize;
+                    let to = (first + ((column + 1) as f32 * per_column) as usize).min(last);
+                    let (mut low, mut high) = frames[from..=to]
+                        .iter()
+                        .map(|frame| value(*frame, *signal))
+                        .fold((f32::MAX, f32::MIN), |(low, high), v| {
+                            (low.min(v), high.max(v))
+                        });
+                    if let Some((previous_low, previous_high)) = previous {
+                        low = low.min(previous_high);
+                        high = high.max(previous_low);
+                    }
+                    previous = Some((low, high));
+                    let x = plot.left() + column as f32;
+                    let top = y_of(high);
+                    let bottom = y_of(low).max(top + 1.0);
+                    mesh.add_colored_rect(
+                        Rect::from_min_max(pos2(x, top), pos2(x + 1.0, bottom)),
+                        *color,
+                    );
                 }
-                previous = Some((low, high));
-                let x = plot.left() + column as f32;
-                let top = y_of(high);
-                let bottom = y_of(low).max(top + 1.0);
-                mesh.add_colored_rect(
-                    Rect::from_min_max(pos2(x, top), pos2(x + 1.0, bottom)),
-                    *color,
-                );
-            }
-            clipped.add(Shape::mesh(mesh));
-        } else {
-            view.points.clear();
-            view.points.extend(
-                (first..=last)
-                    .map(|index| pos2(x_of(index as f32), y_of(value(frames[index], *signal)))),
-            );
-            let sparse = (last - first) as f32 * 6.0 < width;
-            if sparse {
-                for point in &view.points {
-                    clipped.circle_filled(*point, 2.0, *color);
+                clipped.add(Shape::mesh(mesh));
+            } else {
+                view.points.clear();
+                view.points
+                    .extend((first..=last).map(|index| {
+                        pos2(x_of(index as f32), y_of(value(frames[index], *signal)))
+                    }));
+                let sparse = (last - first) as f32 * 6.0 < width;
+                if sparse {
+                    for point in &view.points {
+                        clipped.circle_filled(*point, 2.0, *color);
+                    }
                 }
+                clipped.add(Shape::line(view.points.clone(), stroke(1.4, *color)));
             }
-            clipped.add(Shape::line(view.points.clone(), stroke(1.4, *color)));
         }
     }
 
@@ -368,9 +442,11 @@ pub fn draw(
         }
     }
 
-    // Header: trigger state, legend and measurements, in that priority.
+    // Header: trigger state, legend and measurements, in that priority. The first signal
+    // with audio sets the trigger state and the time scale.
+    let trigger = views[first_index].trigger;
     let mut header = Header::new(&painter, rect, "OSCILLOSCOPE");
-    let (state, color, lit) = match (settings.trigger, view.trigger) {
+    let (state, color, lit) = match (settings.trigger, trigger) {
         (TriggerMode::Free, _) => ("FREE RUN", TEXT_DIM, false),
         (_, Some(_)) => ("TRIGGERED", colors.accent, true),
         (_, None) => ("AUTO", TEXT, true),
@@ -378,9 +454,19 @@ pub fn draw(
     if let Some(slot) = header.right_slot(86.0, 18.0) {
         pill(ui, slot, state, color, lit);
     }
-    for (_, label, color) in &traces[..shown] {
-        header.legend(label, *color);
+    name_traces(&mut header, traces);
+    if !overlay {
+        for (_, label, color) in &lines[0][..shown] {
+            header.legend(label, *color);
+        }
     }
+    let Window {
+        rate,
+        span,
+        wanted,
+        pre,
+        ..
+    } = first;
     let per_division = format!(
         "{} /div",
         format_ms(1_000.0 * span as f32 / rate / DIVISIONS_X as f32)
@@ -390,8 +476,7 @@ pub fn draw(
         format_amplitude(1.0 / gain),
         20.0 * gain.log10()
     );
-    let frequency = view
-        .trigger
+    let frequency = trigger
         .and_then(|trigger| trigger.period)
         .map(|period| format!(" · ≈ {:.1} Hz", rate / period))
         .unwrap_or_default();
@@ -451,21 +536,34 @@ pub fn draw(
 
     let response = ui.interact(plot, Id::new("oscilloscope-plot"), Sense::hover());
     if let Some(pointer) = response.hover_pos() {
-        let index = view.start + (pointer.x - plot.left()) / plot.width() * span as f32;
-        let sample = (index.round() as usize).min(len - 1);
-        let ms = 1_000.0 * (index - view.start - pre as f32) / rate;
+        let fraction = (pointer.x - plot.left()) / plot.width();
+        let ms = 1_000.0 * (fraction * span as f32 - pre as f32) / rate;
         clipped.vline(pointer.x, plot.y_range(), stroke(1.0, alpha(TEXT, 0.3)));
-        let mut lines = vec![(format!("{ms:+.3} ms"), TEXT)];
-        for (signal, label, color) in &traces[..shown] {
-            let v = value(frames[sample], *signal);
-            let db = if v.abs() > 1e-9 {
-                format!("{:.1} dBFS", 20.0 * v.abs().log10())
-            } else {
-                String::from("–∞")
+        let mut tip = vec![(format!("{ms:+.3} ms"), TEXT)];
+        for ((view, trace), (window, lines)) in
+            views.iter().zip(traces).zip(windows.iter().zip(&lines))
+        {
+            let Some(window) = window else {
+                continue;
             };
-            lines.push((format!("{label:<5} {v:+.4}  {db}"), *color));
+            let index = view.start + fraction * window.span as f32;
+            let frame = trace.signal.scope[(index.round().max(0.0) as usize).min(window.len - 1)];
+            for (signal, label, color) in &lines[..shown] {
+                let v = value(frame, *signal);
+                let db = if v.abs() > 1e-9 {
+                    format!("{:.1} dBFS", 20.0 * v.abs().log10())
+                } else {
+                    String::from("–∞")
+                };
+                let label = if overlay {
+                    format!("{} {label}", trace.name)
+                } else {
+                    format!("{label:<5}")
+                };
+                tip.push((format!("{label} {v:+.4}  {db}"), *color));
+            }
         }
-        tooltip(&painter, pointer, plot, &lines);
+        tooltip(&painter, pointer, plot, &tip);
     }
 }
 
@@ -483,12 +581,12 @@ fn lanes(plot: Rect, layout: ScopeLayout, shown: usize) -> Vec<Rect> {
     }
 }
 
-/// Long spans: the envelope history scrolling from right to left, newest on the right,
+/// Long spans: the envelope histories scrolling from right to left, newest on the right,
 /// without a trigger.
 fn draw_roll(
     ui: &mut Ui,
     (rect, plot): (Rect, Rect),
-    view: &mut OscilloscopeView,
+    (views, traces): (&mut [&mut OscilloscopeView], &[Trace<'_>]),
     settings: &OscilloscopeSettings,
     style: &ScopeStyle,
     frozen: bool,
@@ -496,35 +594,31 @@ fn draw_roll(
     let painter = ui.painter_at(rect);
     let span_s = settings.span.seconds();
     let buckets = (span_s / ENVELOPE_BUCKET_S).round() as usize;
-    let traces = trace_colors(settings.channels, style);
+    let overlay = traces.len() > 1;
     let shown = if settings.channels.signals().1.is_some() {
         2
     } else {
         1
     };
+    let lines: Vec<Lines> = traces
+        .iter()
+        .map(|trace| lines_of(trace, overlay, settings.channels, style))
+        .collect();
     if !frozen {
-        let peak = traces[..shown]
+        let peak = views
             .iter()
-            .filter_map(|(signal, _, _)| view.extent(*signal, 0..buckets))
+            .zip(&lines)
+            .flat_map(|(view, lines)| {
+                lines[..shown]
+                    .iter()
+                    .filter_map(|(signal, _, _)| view.extent(*signal, 0..buckets))
+            })
             .map(|(min, max)| min.abs().max(max.abs()))
             .fold(0.0, f32::max);
-        view.gain = match settings.zoom.factor() {
-            Some(factor) => factor,
-            None => {
-                let target = if peak > 1e-6 {
-                    (0.9 / peak).clamp(1.0, MAX_GAIN)
-                } else {
-                    view.gain
-                };
-                if target < view.gain {
-                    target
-                } else {
-                    (view.gain * GAIN_RISE).min(target)
-                }
-            }
-        };
+        let gain = next_gain(views[0].gain, peak, settings);
+        views.iter_mut().for_each(|view| view.gain = gain);
     }
-    let gain = view.gain;
+    let gain = views[0].gain;
     let lanes = lanes(plot, settings.layout, shown);
     for lane in &lanes {
         draw_grid(&painter, *lane, gain);
@@ -532,34 +626,39 @@ fn draw_roll(
     let clipped = painter.with_clip_rect(plot.shrink(1.0));
     let width = plot.width().max(1.0) as usize;
     let per_pixel = buckets as f32 / width as f32;
-    for (trace, (signal, _, color)) in traces[..shown].iter().enumerate().rev() {
-        let lane = lanes[trace.min(lanes.len() - 1)];
-        let y_of = |sample: f32| lane.center().y - sample * gain * lane.height() * 0.5;
-        let mut mesh = Mesh::default();
-        for pixel in 0..width {
-            // Pixel 0 is the oldest; ages count back from the newest bucket.
-            let newest = ((width - 1 - pixel) as f32 * per_pixel) as usize;
-            let oldest = (((width - pixel) as f32 * per_pixel) as usize).max(newest + 1);
-            let Some((min, max)) = view.extent(*signal, newest..oldest) else {
-                continue;
-            };
-            let x = plot.left() + pixel as f32;
-            let top = y_of(max);
-            let bottom = y_of(min).max(top + 1.0);
-            mesh.add_colored_rect(
-                Rect::from_min_max(pos2(x, top), pos2(x + 1.0, bottom)),
-                *color,
-            );
+    for (view, lines) in views.iter().zip(&lines).rev() {
+        for (line, (signal, _, color)) in lines[..shown].iter().enumerate().rev() {
+            let lane = lanes[line.min(lanes.len() - 1)];
+            let y_of = |sample: f32| lane.center().y - sample * gain * lane.height() * 0.5;
+            let mut mesh = Mesh::default();
+            for pixel in 0..width {
+                // Pixel 0 is the oldest; ages count back from the newest bucket.
+                let newest = ((width - 1 - pixel) as f32 * per_pixel) as usize;
+                let oldest = (((width - pixel) as f32 * per_pixel) as usize).max(newest + 1);
+                let Some((min, max)) = view.extent(*signal, newest..oldest) else {
+                    continue;
+                };
+                let x = plot.left() + pixel as f32;
+                let top = y_of(max);
+                let bottom = y_of(min).max(top + 1.0);
+                mesh.add_colored_rect(
+                    Rect::from_min_max(pos2(x, top), pos2(x + 1.0, bottom)),
+                    *color,
+                );
+            }
+            clipped.add(Shape::mesh(mesh));
         }
-        clipped.add(Shape::mesh(mesh));
     }
 
     let mut header = Header::new(&painter, rect, "OSCILLOSCOPE");
     if let Some(slot) = header.right_slot(86.0, 18.0) {
         pill(ui, slot, "ROLL", TEXT, true);
     }
-    for (_, label, color) in &traces[..shown] {
-        header.legend(label, *color);
+    name_traces(&mut header, traces);
+    if !overlay {
+        for (_, label, color) in &lines[0][..shown] {
+            header.legend(label, *color);
+        }
     }
     let per_division = format!("{} /div", format_seconds(span_s / DIVISIONS_X as f32));
     header.right_text(
@@ -592,14 +691,8 @@ fn draw_roll(
             TEXT_FAINT,
         );
     }
-    if view.filled == 0 {
-        painter.text(
-            plot.center(),
-            Align2::CENTER_CENTER,
-            "Waiting for audio",
-            font(12.0),
-            TEXT_DIM,
-        );
+    if views.iter().all(|view| view.filled == 0) {
+        message(&painter, plot, traces[0].waiting_text());
     }
 
     let response = ui.interact(plot, Id::new("oscilloscope-roll"), Sense::hover());
@@ -607,14 +700,21 @@ fn draw_roll(
         let fraction = ((pointer.x - plot.left()) / plot.width()).clamp(0.0, 1.0);
         let age = ((1.0 - fraction) * buckets as f32) as usize;
         clipped.vline(pointer.x, plot.y_range(), stroke(1.0, alpha(TEXT, 0.3)));
-        let mut lines = vec![(format!("−{:.3} s", age as f32 * ENVELOPE_BUCKET_S), TEXT)];
-        for (signal, label, color) in &traces[..shown] {
-            let reach = (per_pixel.ceil() as usize).max(1);
-            if let Some((min, max)) = view.extent(*signal, age..age + reach) {
-                lines.push((format!("{label:<5} {min:+.3} … {max:+.3}"), *color));
+        let mut tip = vec![(format!("−{:.3} s", age as f32 * ENVELOPE_BUCKET_S), TEXT)];
+        let reach = (per_pixel.ceil() as usize).max(1);
+        for ((view, trace), lines) in views.iter().zip(traces).zip(&lines) {
+            for (signal, label, color) in &lines[..shown] {
+                if let Some((min, max)) = view.extent(*signal, age..age + reach) {
+                    let label = if overlay {
+                        format!("{} {label}", trace.name)
+                    } else {
+                        format!("{label:<5}")
+                    };
+                    tip.push((format!("{label} {min:+.3} … {max:+.3}"), *color));
+                }
             }
         }
-        tooltip(&painter, pointer, plot, &lines);
+        tooltip(&painter, pointer, plot, &tip);
     }
 }
 
@@ -695,13 +795,13 @@ mod tests {
     use std::f32::consts::TAU;
 
     use super::{OscilloscopeView, find_trigger, format_seconds};
-    use crate::analysis::Published;
+    use crate::analysis::SignalReading;
     use crate::settings::{Choice, Signal};
 
     #[test]
     fn roll_mode_reads_the_envelope_history() {
         let mut view = OscilloscopeView::default();
-        let mut data = Published::default();
+        let mut data = SignalReading::default();
         // Buckets with the left channel rising from 0 to 0.99 in steps of 0.01.
         data.envelope.extend((0..100).map(|step| {
             let value = step as f32 / 100.0;

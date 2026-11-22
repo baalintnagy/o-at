@@ -274,7 +274,7 @@ analysis fell behind. Its pages, in this order, show:
 | Sonogram | Scrolling time × frequency image, newest on the right, with a hover readout. | FFT 1K–32K, one signal (mid, side, left or right) or two stacked lanes (L · R or M · S), log, linear or semitone (ST) frequency, 15–240 columns/s, 30–150 dB range |
 | Scope | Oscilloscope of one or two signals, overlaid or stacked, triggered on a rising or falling level crossing with sub-sample alignment so periodic signals stand still; drag the T marker to set the level. Shows the frequency between crossings and a hover readout. | 1 ms – 60 s span (above 500 ms a scrolling roll view of the min/max envelope, without trigger); L·R, M·S or one signal; free, rising or falling trigger on mid, side, left or right; automatic or ×1–×32 gain |
 | Stereo | Goniometer, correlation and balance, mid and side levels, the side-to-mid ratio (in the header), and the stereo position and width of 30 third-octave bands (red where they are out of phase). | M/S goniometer, polar sample cloud or L/R scope, each drawn as dots or lines; 512–4096 samples; automatic or fixed gain; band FFT length (shared with the spectrum) |
-| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history, all on the diagrams' shared background and grid. The header shows the target and the measured time. | Targets −14, −16, −23, −24 LUFS; LUFS or LU; 30 s to 10 min history; RESET in the panel header or in its settings |
+| Loudness | EBU R 128 / ITU-R BS.1770-4 momentary, short-term and integrated loudness, loudness range, true peak (4× oversampled), sample peak and PLR, bar meters and a loudness history, all on the diagrams' shared background and grid. The header shows the target and the measured time. PLATFORMS shows, in place of the history, what streaming platforms' normalization does to each shown signal. | Target presets −11 (Spotify Loud), −14 (Spotify, YouTube, Tidal, Amazon), −15 (Deezer), −16 (Apple Music, podcasts), −18 (AES streaming), −19 (Spotify Quiet), −23 (EBU R 128), −24 (ATSC A/85) LUFS or a custom target; LUFS or LU; 30 s to 10 min history; PLATFORMS; RESET in the panel header or in its settings |
 | 3D | The spectrum history as ridges or a shaded surface, or the stereogram: level over stereo position and frequency. Drag to rotate, shift-drag or right-drag to move, wheel to zoom, double-click to reset. | 64–256 bands, 32–128 rows, 30–150 dB range, a 3D grid (floor, back walls and dB levels), camera rotation, elevation and zoom with RESET VIEW, FFT, one scene or two stacked ones (L · R or M · S, shared with the Sonogram page); its heat map is a color |
 
 | | |
@@ -290,6 +290,64 @@ analysis fell behind. Its pages, in this order, show:
 
 The screenshots show a synthetic test piece: chords, bass, drums and a melody, panned
 across the stereo field.
+
+### Sources: comparing tracks and references
+
+**SOURCES** in the header adds audio buses from [O-AUD-TX](#o-aud-tx-and-o-aud-rx) next
+to the input, up to eight, each with a color of its own. The panel lists every source's
+format and momentary, short-term and integrated loudness. Pick a live bus from the list
+or type a name, which waits for its transmitter.
+
+Every view chooses its signals under **SIGNALS** at the top of its settings: INPUT and
+each listed bus, as toggles in their colors. One signal is drawn as usual, with all of
+the view's settings; several are overlaid, each in its color and named in the header:
+
+| View | Several signals |
+| --- | --- |
+| Spectrum | The first in full, the others as curves of their first channel |
+| Sonogram, spectral | The images tinted in each signal's color; the waveforms in their colors |
+| 3D | Ridge lines in each signal's color in one scene, also for the stereogram |
+| Oscilloscope | Each signal's traces, triggered on its own audio, with one gain |
+| Stereo | Goniometer dots in each color, a correlation meter each and their position per band |
+| Loudness | The first's readouts and bars, every signal's short-term history and a comparison table |
+
+Every view shows every listed bus until you hide it there; a source's dot in the panel
+shows or hides it on the spectrum. Sessions from before per-view signals keep the
+spectrum curves they had hidden. Removing a bus removes it from every view.
+
+- **Match level** shifts each further spectrum curve by its loudness difference to the
+  first (integrated loudness, short-term until that is measured), for comparisons at
+  equal loudness, for example against a reference track.
+- **Masking** shades the frequencies where the two loudest curves are within 6 dB of
+  each other and above −60 dB, with a red strip along the bottom.
+
+In a DAW, put O-AUD-TX last on the tracks or groups you want to compare (THRU on, so
+the mix is unchanged) and O-AUD-A on the master, then add their buses. A reference
+playing in another application reaches O-AUD-A through the O-AUD-TX application's
+loopback capture. Buses are measured at their own sample rate, so their rates need not
+match. Sources are not time-aligned with the input: overlays compare signals, they do
+not line them up, and each oscilloscope trace has its own trigger. Sources and every
+view's signals are saved with the session by name.
+
+### Streaming platforms
+
+**PLATFORMS** in the loudness header replaces the history with a table of streaming
+platforms: their reference loudness and true peak ceiling, and for the shown signal the
+gain the platform applies, the loudness and true peak after it and what happens:
+
+- **turned down**: louder than the reference; the extra loudness is lost.
+- **left quieter**: the platform only turns down (YouTube, Amazon Music, Tidal, Deezer),
+  so a quieter track stays quieter than its neighbours.
+- **held by peak**: the platform turns up only until the true peak reaches its ceiling
+  (Spotify, Apple Music), so a quiet, peaky track stays quieter.
+- **limited**: Spotify Loud turns up all the way and limits the peaks.
+- A red true peak is above the ceiling after the gain, where lossy encoding may clip.
+
+It works from the integrated loudness and the true peak maximum, so play the whole
+track (or the loudest part, for a quick check). With several signals, each has a column
+with its gain and resulting loudness: compare a master with a reference as the
+platform will play them. The references are published or commonly measured values
+(see [the design notes](docs/o-aud-a.md#streaming-platforms)); platforms change them.
 
 ### Settings and colors
 

@@ -1,4 +1,7 @@
-//! The loudness meter: EBU R 128 readouts, bar meters and the loudness history.
+//! The loudness meter: EBU R 128 readouts, bar meters and the loudness history. With
+//! several shown signals, the readouts and bars are the first's, the history overlays
+//! every signal's short-term loudness and a table compares them. PLATFORMS shows, in
+//! place of the history, what each streaming platform's normalization does to them.
 
 use aud_ui::theme::{
     ALERT, BORDER, METER_WARN, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke,
@@ -6,12 +9,14 @@ use aud_ui::theme::{
 use aud_ui::widgets::{button, panel};
 use egui::{Align2, Color32, CornerRadius, Id, Painter, Pos2, Rect, Shape, Ui, pos2, vec2};
 
+use crate::analysis::history_entries;
 use crate::analysis::loudness::LoudnessReading;
-use crate::analysis::{Published, history_entries};
+use crate::platforms::{PLATFORMS, Playback, Verdict};
 use crate::settings::{LoudnessScale, LoudnessSettings};
 use crate::style::LoudnessStyle;
 use crate::view::colormap::{Colors, paint, rgb};
-use crate::view::plot::{Header, grid, plot_background, text_width};
+use crate::view::plot::{Header, grid, message, plot_background, text_width};
+use crate::view::sources::{NO_SIGNALS, Trace, name_traces};
 
 /// Shown loudness range around the target in LU.
 const BELOW_TARGET_LU: f32 = 36.0;
@@ -28,6 +33,8 @@ const MIN_HISTORY_WIDTH: f32 = 140.0;
 /// Height of the compact readout strip and width of one of its cells.
 const STRIP_HEIGHT: f32 = 44.0;
 const STRIP_CELL_WIDTH: f32 = 84.0;
+/// Row height of the comparison table in logical pixels.
+const TABLE_ROW: f32 = 16.0;
 
 /// Loudness text in the selected scale.
 fn loudness_text(lufs: f32, settings: &LoudnessSettings) -> String {
@@ -36,7 +43,7 @@ fn loudness_text(lufs: f32, settings: &LoudnessSettings) -> String {
     }
     match settings.scale {
         LoudnessScale::Absolute => format!("{lufs:.1}"),
-        LoudnessScale::Relative => format!("{:+.1}", lufs - settings.target.lufs()),
+        LoudnessScale::Relative => format!("{:+.1}", lufs - settings.target_lufs()),
     }
 }
 
@@ -82,19 +89,25 @@ fn duration_text(seconds: f32) -> String {
     }
 }
 
-/// Draws the loudness panel. Returns `true` when its RESET button was clicked.
+/// Draws the loudness panel of `traces`. Returns `true` when its RESET button was
+/// clicked.
 pub fn draw(
     ui: &mut Ui,
     rect: Rect,
-    data: &Published,
+    traces: &[Trace<'_>],
     settings: &mut LoudnessSettings,
     (colors, style): (&Colors, &LoudnessStyle),
     compact: bool,
 ) -> bool {
     panel(ui, rect, "LOUDNESS", colors.accent);
     let painter = ui.painter_at(rect);
-    let reading = &data.loudness;
-    let target = settings.target.lufs();
+    let Some(first) = traces.first() else {
+        message(&painter, rect, NO_SIGNALS);
+        return false;
+    };
+    let overlay = traces.len() > 1;
+    let reading = &first.signal.loudness;
+    let target = settings.target_lufs();
     let duration = duration_text(reading.duration_s);
     let mut header = Header::new(&painter, rect, "LOUDNESS");
     let reset = header.right_slot(52.0, 18.0).is_some_and(|slot| {
@@ -109,6 +122,21 @@ pub fn draw(
         .on_hover_text("Restart the integrated loudness, range, maxima and history")
         .clicked()
     });
+    if let Some(slot) = header.right_slot(84.0, 18.0) {
+        let response = button(
+            ui,
+            Id::new("loudness-platforms"),
+            slot,
+            "PLATFORMS",
+            colors.accent,
+            settings.platforms,
+        )
+        .on_hover_text("What streaming platforms' normalization does, in place of the history");
+        if response.clicked() {
+            settings.platforms = !settings.platforms;
+        }
+    }
+    name_traces(&mut header, traces);
     header.right_text(
         &[
             format!(
@@ -143,7 +171,11 @@ pub fn draw(
                 pos2(bars.right() + HISTORY_SCALE_WIDTH, below.top() + 4.0),
                 pos2(below.right(), below.bottom() - 14.0),
             );
-            draw_history(&painter, history, data, (settings, style));
+            if settings.platforms {
+                draw_platforms(&painter, history, traces, (settings, style));
+            } else {
+                draw_history(&painter, history, traces, (settings, style));
+            }
         }
         return reset;
     }
@@ -154,10 +186,49 @@ pub fn draw(
         vec2(150.0, content.height()),
     );
     draw_bars(&painter, bars, reading, (settings, style));
+    // Below the history: the true peaks, or with several signals the comparison table.
+    let below = if overlay {
+        (30.0 + TABLE_ROW * (traces.len() + 1) as f32).max(72.0)
+    } else {
+        72.0
+    };
     let history = Rect::from_min_max(
         pos2(bars.right() + 44.0, content.top() + 18.0),
-        pos2(content.right(), content.bottom() - 72.0),
+        pos2(content.right(), content.bottom() - below),
     );
+    if settings.platforms {
+        painter.text(
+            pos2(history.left() - 34.0, content.top() + 6.0),
+            Align2::LEFT_CENTER,
+            "PLATFORMS",
+            font(10.0),
+            TEXT_DIM,
+        );
+        let table = Rect::from_min_max(pos2(history.left() - 34.0, history.top()), history.max);
+        draw_platforms(&painter, table, traces, (settings, style));
+    } else {
+        draw_history_with_legend(&painter, (history, content), traces, (settings, style));
+    }
+    let peaks = Rect::from_min_max(
+        pos2(history.left() - 34.0, history.bottom() + 26.0),
+        pos2(content.right(), content.bottom()),
+    );
+    if overlay {
+        draw_comparison(&painter, peaks, traces, (settings, style));
+    } else {
+        draw_true_peaks(&painter, peaks, reading, style);
+    }
+    reset
+}
+
+/// The history with its caption and legend above it.
+fn draw_history_with_legend(
+    painter: &Painter,
+    (history, content): (Rect, Rect),
+    traces: &[Trace<'_>],
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
+) {
+    let overlay = traces.len() > 1;
     painter.text(
         pos2(history.left() - 34.0, content.top() + 6.0),
         Align2::LEFT_CENTER,
@@ -166,10 +237,18 @@ pub fn draw(
         TEXT_DIM,
     );
     let mut x = history.left() + 60.0;
-    for (label, color) in [
-        ("short-term", paint(style.short_term)),
-        ("momentary", paint(style.momentary)),
-    ] {
+    let legend: Vec<(&str, Color32)> = if overlay {
+        traces
+            .iter()
+            .map(|trace| (trace.name, trace.color))
+            .collect()
+    } else {
+        vec![
+            ("short-term", paint(style.short_term)),
+            ("momentary", paint(style.momentary)),
+        ]
+    };
+    for (label, color) in legend {
         painter.rect_filled(
             Rect::from_center_size(pos2(x, content.top() + 6.0), vec2(10.0, 3.0)),
             CornerRadius::same(1),
@@ -184,13 +263,232 @@ pub fn draw(
         );
         x = end.right() + 16.0;
     }
-    draw_history(&painter, history, data, (settings, style));
-    let peaks = Rect::from_min_max(
-        pos2(history.left() - 34.0, history.bottom() + 26.0),
-        pos2(content.right(), content.bottom()),
+    draw_history(painter, history, traces, (settings, style));
+}
+
+/// The color of what a platform does: on target, turned down (louder than needed), left
+/// quieter or held by peak (quieter than the others), limited.
+fn verdict_color(verdict: Verdict, style: &LoudnessStyle) -> Color32 {
+    match verdict {
+        Verdict::Unchanged => rgb(style.on_target),
+        Verdict::TurnedDown => rgb(style.too_loud),
+        Verdict::LeftQuiet | Verdict::HeldByPeak => rgb(style.too_quiet),
+        Verdict::Limited => ALERT,
+        Verdict::TurnedUp => TEXT,
+    }
+}
+
+/// What each streaming platform does with the shown signals: its reference, and per
+/// signal the gain, the loudness and true peak after it and a verdict. With several
+/// signals, each gets a column with the gain and the resulting loudness.
+fn draw_platforms(
+    painter: &Painter,
+    rect: Rect,
+    traces: &[Trace<'_>],
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
+) {
+    let rows = PLATFORMS.len() + 1;
+    let footnote = 16.0;
+    let row = ((rect.height() - footnote) / rows as f32).clamp(14.0, 24.0);
+    let name_width = 104.0;
+    let reference_width = 100.0;
+    let first_value = rect.left() + name_width + reference_width;
+    let single = traces.len() == 1;
+    let columns: Vec<&str> = if single {
+        vec!["GAIN", "LOUDNESS", "PEAK", ""]
+    } else {
+        traces.iter().map(|trace| trace.name).collect()
+    };
+    let cell = (rect.right() - first_value) / columns.len() as f32;
+    let y_of = |index: usize| rect.top() + index as f32 * row;
+    painter.text(
+        pos2(rect.left(), y_of(0)),
+        Align2::LEFT_TOP,
+        "PLATFORM",
+        font(10.0),
+        TEXT_DIM,
     );
-    draw_true_peaks(&painter, peaks, reading, style);
-    reset
+    painter.text(
+        pos2(rect.left() + name_width, y_of(0)),
+        Align2::LEFT_TOP,
+        "REFERENCE",
+        font(10.0),
+        TEXT_DIM,
+    );
+    for (column, caption) in columns.iter().enumerate() {
+        let color = if single {
+            TEXT_DIM
+        } else {
+            traces[column].color
+        };
+        painter.text(
+            pos2(first_value + column as f32 * cell, y_of(0)),
+            Align2::LEFT_TOP,
+            *caption,
+            font(10.0),
+            color,
+        );
+    }
+    let measured: Vec<(f32, f32)> = traces
+        .iter()
+        .map(|trace| {
+            let loudness = &trace.signal.loudness;
+            (
+                loudness.integrated_lufs,
+                loudness.true_peak_max_db[0].max(loudness.true_peak_max_db[1]),
+            )
+        })
+        .collect();
+    let target = settings.target_lufs();
+    for (index, platform) in PLATFORMS.iter().enumerate() {
+        let y = y_of(index + 1);
+        if index % 2 == 0 {
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(rect.left() - 4.0, y - 2.0),
+                    pos2(rect.right(), y + row - 2.0),
+                ),
+                CornerRadius::same(2),
+                alpha(grid(painter), 0.25),
+            );
+        }
+        painter.text(
+            pos2(rect.left(), y),
+            Align2::LEFT_TOP,
+            platform.name,
+            font(11.0),
+            TEXT,
+        );
+        let reference = platform.reference_lufs.map_or_else(
+            || String::from("none"),
+            |lufs| format!("{lufs:.0} · {:.0} dBTP", platform.ceiling_dbtp),
+        );
+        painter.text(
+            pos2(rect.left() + name_width, y),
+            Align2::LEFT_TOP,
+            reference,
+            mono(11.0),
+            TEXT_DIM,
+        );
+        for (column, (integrated, peak)) in measured.iter().enumerate() {
+            let x = first_value + column as f32 * cell;
+            let Some(playback) = platform.playback(*integrated, *peak) else {
+                painter.text(pos2(x, y), Align2::LEFT_TOP, "–", mono(11.0), TEXT_DIM);
+                continue;
+            };
+            let gain = format!("{:+.1} dB", playback.gain_db);
+            let verdict = verdict_color(playback.verdict, style);
+            if single {
+                let cells = [
+                    (gain, verdict),
+                    (
+                        loudness_text(playback.loudness_lufs, settings),
+                        target_color(playback.loudness_lufs, target, style),
+                    ),
+                    (peak_text(playback.true_peak_db), peak_cell_color(&playback)),
+                    (playback.verdict.text().to_owned(), verdict),
+                ];
+                for (offset, (text, color)) in cells.into_iter().enumerate() {
+                    let font = if offset == 3 { font(11.0) } else { mono(11.0) };
+                    painter.text(
+                        pos2(x + offset as f32 * cell, y),
+                        Align2::LEFT_TOP,
+                        text,
+                        font,
+                        color,
+                    );
+                }
+            } else {
+                painter.text(
+                    pos2(x, y),
+                    Align2::LEFT_TOP,
+                    format!(
+                        "{gain} → {}",
+                        loudness_text(playback.loudness_lufs, settings)
+                    ),
+                    mono(11.0),
+                    verdict,
+                );
+            }
+        }
+    }
+    painter.text(
+        pos2(rect.left(), rect.bottom()),
+        Align2::LEFT_BOTTOM,
+        "From integrated loudness and true peak max · published and measured references, \
+         which platforms change",
+        font(9.0),
+        TEXT_FAINT,
+    );
+}
+
+fn peak_cell_color(playback: &Playback) -> Color32 {
+    if playback.over_ceiling { ALERT } else { TEXT }
+}
+
+/// Every shown signal's loudness side by side, one row each.
+fn draw_comparison(
+    painter: &Painter,
+    rect: Rect,
+    traces: &[Trace<'_>],
+    (settings, style): (&LoudnessSettings, &LoudnessStyle),
+) {
+    let target = settings.target_lufs();
+    let name_width = (rect.width() * 0.3).clamp(60.0, 160.0);
+    let columns = ["I", "S", "M", "LRA", "TP MAX"];
+    let cell = (rect.width() - name_width) / columns.len() as f32;
+    let x_of = |column: usize| rect.left() + name_width + column as f32 * cell;
+    painter.text(
+        rect.left_top(),
+        Align2::LEFT_TOP,
+        "SIGNAL",
+        font(10.0),
+        TEXT_DIM,
+    );
+    for (column, caption) in columns.iter().enumerate() {
+        painter.text(
+            pos2(x_of(column), rect.top()),
+            Align2::LEFT_TOP,
+            *caption,
+            font(10.0),
+            TEXT_DIM,
+        );
+    }
+    for (row, trace) in traces.iter().enumerate() {
+        let y = rect.top() + (row + 1) as f32 * TABLE_ROW + 2.0;
+        if y + TABLE_ROW > rect.bottom() + 4.0 {
+            break;
+        }
+        let reading = &trace.signal.loudness;
+        painter.circle_filled(pos2(rect.left() + 4.0, y + 6.0), 3.5, trace.color);
+        painter.text(
+            pos2(rect.left() + 12.0, y),
+            Align2::LEFT_TOP,
+            trace.name,
+            font(11.0),
+            TEXT,
+        );
+        let true_peak = reading.true_peak_max_db[0].max(reading.true_peak_max_db[1]);
+        let cells = [
+            (
+                loudness_text(reading.integrated_lufs, settings),
+                target_color(reading.integrated_lufs, target, style),
+            ),
+            (loudness_text(reading.short_term_lufs, settings), TEXT),
+            (loudness_text(reading.momentary_lufs, settings), TEXT),
+            (format!("{:.1}", reading.range_lu), TEXT),
+            (peak_text(true_peak), peak_color(true_peak)),
+        ];
+        for (column, (text, color)) in cells.into_iter().enumerate() {
+            painter.text(
+                pos2(x_of(column), y),
+                Align2::LEFT_TOP,
+                text,
+                mono(11.0),
+                color,
+            );
+        }
+    }
 }
 
 fn draw_readouts(
@@ -199,7 +497,7 @@ fn draw_readouts(
     reading: &LoudnessReading,
     (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
-    let target = settings.target.lufs();
+    let target = settings.target_lufs();
     let unit = unit(settings);
     let big = 40.0;
     painter.text(
@@ -343,7 +641,7 @@ fn draw_readout_strip(
     reading: &LoudnessReading,
     (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
-    let target = settings.target.lufs();
+    let target = settings.target_lufs();
     let color = target_color(reading.integrated_lufs, target, style);
     let value = painter.text(
         rect.left_top(),
@@ -403,7 +701,7 @@ fn draw_bars(
     reading: &LoudnessReading,
     (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
-    let target = settings.target.lufs();
+    let target = settings.target_lufs();
     let (floor, top) = (target - BELOW_TARGET_LU, target + ABOVE_TARGET_LU);
     let scale_width = 30.0;
     // The meters stand in a diagram with the shared background and grid.
@@ -492,14 +790,16 @@ fn draw_bars(
     ));
 }
 
+/// The loudness history: momentary and short-term loudness of one signal, or the
+/// short-term loudness of each of several.
 fn draw_history(
     painter: &Painter,
     rect: Rect,
-    data: &Published,
+    traces: &[Trace<'_>],
     (settings, style): (&LoudnessSettings, &LoudnessStyle),
 ) {
     plot_background(painter, rect);
-    let target = settings.target.lufs();
+    let target = settings.target_lufs();
     let (floor, top) = (target - 30.0, target + 12.0);
     let y_of = |lufs: f32| {
         let lufs = if lufs.is_finite() { lufs } else { floor };
@@ -570,24 +870,33 @@ fn draw_history(
         );
         seconds += step_s;
     }
-    let history = &data.loudness_history;
-    let shown = history.len().min(entries);
-    let start = history.len() - shown;
-    let x_of = |index: usize| {
-        rect.right() - rect.width() * (shown - 1 - index) as f32 / entries.max(2) as f32
-    };
     let clipped = painter.with_clip_rect(rect.shrink(1.0));
-    for (side, color, width) in [
-        (0, paint(style.momentary), 1.0),
-        (1, paint(style.short_term), 1.8),
-    ] {
-        let points: Vec<Pos2> = history
-            .range(start..)
-            .enumerate()
-            .map(|(index, point)| pos2(x_of(index), y_of(point[side])))
-            .collect();
-        if points.len() > 1 {
-            clipped.add(Shape::line(points, stroke(width, color)));
+    let overlay = traces.len() > 1;
+    // Later signals under earlier ones, so the first stays on top.
+    for trace in traces.iter().rev() {
+        let history = &trace.signal.loudness_history;
+        let shown = history.len().min(entries);
+        let start = history.len() - shown;
+        let x_of = |index: usize| {
+            rect.right() - rect.width() * (shown - 1 - index) as f32 / entries.max(2) as f32
+        };
+        let lines = if overlay {
+            vec![(1, trace.color, 1.6)]
+        } else {
+            vec![
+                (0, paint(style.momentary), 1.0),
+                (1, paint(style.short_term), 1.8),
+            ]
+        };
+        for (side, color, width) in lines {
+            let points: Vec<Pos2> = history
+                .range(start..)
+                .enumerate()
+                .map(|(index, point)| pos2(x_of(index), y_of(point[side])))
+                .collect();
+            if points.len() > 1 {
+                clipped.add(Shape::line(points, stroke(width, color)));
+            }
         }
     }
 }

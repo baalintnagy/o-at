@@ -8,7 +8,9 @@
 pub mod analysis;
 pub mod capture;
 pub mod layout;
+pub mod platforms;
 pub mod settings;
+pub mod sources;
 pub mod style;
 pub mod view;
 pub mod window;
@@ -28,6 +30,7 @@ use nih_plug::prelude::{
 use crate::analysis::Analyzer;
 use crate::capture::{Capture, capture};
 use crate::settings::AnalyzerSettings;
+use crate::sources::SourceList;
 use crate::view::{MIN_HEIGHT, MIN_WIDTH, VIEW_HEIGHT, VIEW_WIDTH, ViewState};
 use crate::window::{EguiEditor, WindowState};
 
@@ -50,6 +53,9 @@ pub struct AnalyzerParams {
     /// View and analysis settings.
     #[persist = "settings"]
     pub settings: Arc<RwLock<AnalyzerSettings>>,
+    /// The buses analyzed next to the input.
+    #[persist = "sources"]
+    pub sources: Arc<RwLock<SourceList>>,
 }
 
 impl Default for AnalyzerParams {
@@ -60,6 +66,7 @@ impl Default for AnalyzerParams {
                 (MIN_WIDTH as u32, MIN_HEIGHT as u32),
             ),
             settings: Arc::new(RwLock::new(AnalyzerSettings::default())),
+            sources: Arc::new(RwLock::new(SourceList::default())),
         }
     }
 }
@@ -74,7 +81,12 @@ impl Default for OAudA {
     fn default() -> Self {
         let params = Arc::new(AnalyzerParams::default());
         let (capture, consumer, stream) = capture();
-        let analyzer = Analyzer::start(consumer, stream, Arc::clone(&params.settings));
+        let analyzer = Analyzer::start(
+            consumer,
+            stream,
+            Arc::clone(&params.settings),
+            Arc::clone(&params.sources),
+        );
         Self {
             params,
             capture,

@@ -1,19 +1,22 @@
 //! The 3D views: the spectrum history as ridges or a shaded surface, and the stereogram,
-//! a surface of level over stereo position and frequency.
+//! a surface of level over stereo position and frequency. Several shown signals are drawn
+//! as ridge lines in their colors in one scene.
 
-use aud_ui::theme::{TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
 use egui::{
     Align2, Color32, CursorIcon, Id, Mesh, Painter, PointerButton, Pos2, Rect, Sense, Shape, Ui,
     pos2, vec2,
 };
 
-use crate::analysis::Published;
 use crate::analysis::spectrum::{PAN_COLUMNS, SURFACE_RATE_HZ, SurfaceFrame};
 use crate::settings::{SurfaceMode, SurfaceSettings};
 use crate::style::SurfaceStyle;
 use crate::view::colormap::{Colors, Palette, rgb};
-use crate::view::plot::{Header, background, format_hz, grid, grid_strong, plot_background};
+use crate::view::plot::{
+    Header, background, format_hz, grid, grid_strong, lane_label, message, plot_background,
+};
+use crate::view::sources::{NO_SIGNALS, Trace, name_traces};
 
 /// Height of a full-scale level in scene units; the floor spans −1..1 in x and z.
 const HEIGHT: f32 = 0.7;
@@ -21,6 +24,8 @@ const HEIGHT: f32 = 0.7;
 const DISTANCE: f32 = 3.6;
 /// Direction towards the light, normalized below.
 const LIGHT: [f32; 3] = [-0.35, 0.85, -0.4];
+/// Inset of a lane's name tag in logical pixels.
+const LABEL_INSET: f32 = 6.0;
 /// Gap between two stacked lanes in logical pixels.
 const LANE_GAP: f32 = 6.0;
 /// Camera rotation per dragged pixel in degrees.
@@ -84,7 +89,7 @@ pub fn draw(
     ui: &mut Ui,
     rect: Rect,
     view: &mut SurfaceView,
-    data: &Published,
+    traces: &[Trace<'_>],
     settings: &mut SurfaceSettings,
     (colors, style, lane_names): (&Colors, &SurfaceStyle, [&str; 2]),
 ) {
@@ -96,7 +101,11 @@ pub fn draw(
     let plot = Rect::from_min_max(rect.min + vec2(12.0, 34.0), rect.max - vec2(12.0, 12.0));
     let painter = ui.painter_at(plot);
     plot_background(&painter, plot);
-    Header::new(&ui.painter_at(rect), rect, title).right_text(
+    let header_painter = ui.painter_at(rect);
+    let mut header = Header::new(&header_painter, rect, title);
+    let overlay = traces.len() > 1;
+    name_traces(&mut header, traces);
+    header.right_text(
         &[
             String::from(
                 "drag to rotate · shift- or right-drag to move · wheel to zoom · \
@@ -112,19 +121,21 @@ pub fn draw(
     if view.palette.heat() != style.heat {
         view.palette = Palette::new(style.heat);
     }
-    let surface = &data.surface;
+    let Some(first) = traces.first() else {
+        message(&painter, plot, NO_SIGNALS);
+        return;
+    };
+    let surface = &first.signal.surface;
     if surface.rows.is_empty() || surface.bands < 2 {
-        painter.text(
-            plot.center(),
-            Align2::CENTER_CENTER,
-            "Waiting for audio",
-            font(12.0),
-            TEXT_DIM,
-        );
+        message(&painter, plot, first.waiting_text());
         return;
     }
     let floor_db = -settings.range;
     let level = |db: f32| ((db - floor_db) / -floor_db).clamp(0.0, 1.0);
+    // Overlaid signals with a history of the same shape.
+    let drawable = |frame: &SurfaceFrame| {
+        frame.bands == surface.bands && frame.lanes == surface.lanes && !frame.rows.is_empty()
+    };
 
     match settings.mode {
         SurfaceMode::Ridges | SurfaceMode::Surface => {
@@ -141,9 +152,20 @@ pub fn draw(
                 if settings.grid {
                     draw_grid(&clipped, &camera, settings.range);
                 }
-                draw_spectrum_lane(&clipped, &camera, view, (surface, lane), settings, &level);
+                if overlay {
+                    draw_spectrum_axes(&clipped, &camera, surface.range_hz, settings.depth.count());
+                    for trace in traces
+                        .iter()
+                        .filter(|trace| drawable(&trace.signal.surface))
+                    {
+                        let frame = (&trace.signal.surface, lane);
+                        draw_ridge_lines(&clipped, &camera, frame, settings, (&level, trace.color));
+                    }
+                } else {
+                    draw_spectrum_lane(&clipped, &camera, view, (surface, lane), settings, &level);
+                }
                 if lanes > 1 {
-                    lane_label(&painter, lane_rect, name);
+                    lane_label(&painter, lane_rect, name, LABEL_INSET);
                     if lane > 0 {
                         painter.hline(
                             plot.x_range(),
@@ -166,24 +188,36 @@ pub fn draw(
                 return;
             }
             draw_stereogram_axes(&clipped, &camera, surface.range_hz);
-            view.points.clear();
-            view.colors.clear();
-            for band in 0..bands {
-                let z = -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
-                for column in 0..PAN_COLUMNS {
-                    let cell = band * PAN_COLUMNS + column;
-                    let value = level(surface.stereo_db[cell]);
-                    let x = -1.0 + 2.0 * column as f32 / (PAN_COLUMNS - 1) as f32;
-                    view.points.push([x, value * HEIGHT, z]);
-                    let base = view.palette.color(value);
-                    let opposite =
-                        (-surface.stereo_correlation[cell]).clamp(0.0, 1.0) * value.sqrt();
-                    view.colors
-                        .push(mix(base, rgb(style.opposite), 0.8 * opposite));
+            if overlay {
+                for trace in traces
+                    .iter()
+                    .filter(|trace| drawable(&trace.signal.surface))
+                {
+                    let frame = &trace.signal.surface;
+                    if frame.stereo_db.len() == bands * PAN_COLUMNS {
+                        draw_stereogram_lines(&clipped, &camera, frame, (&level, trace.color));
+                    }
                 }
+            } else {
+                view.points.clear();
+                view.colors.clear();
+                for band in 0..bands {
+                    let z = -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
+                    for column in 0..PAN_COLUMNS {
+                        let cell = band * PAN_COLUMNS + column;
+                        let value = level(surface.stereo_db[cell]);
+                        let x = -1.0 + 2.0 * column as f32 / (PAN_COLUMNS - 1) as f32;
+                        view.points.push([x, value * HEIGHT, z]);
+                        let base = view.palette.color(value);
+                        let opposite =
+                            (-surface.stereo_correlation[cell]).clamp(0.0, 1.0) * value.sqrt();
+                        view.colors
+                            .push(mix(base, rgb(style.opposite), 0.8 * opposite));
+                    }
+                }
+                let mesh = shaded_mesh(&camera, view, PAN_COLUMNS, bands);
+                clipped.add(Shape::mesh(mesh));
             }
-            let mesh = shaded_mesh(&camera, view, PAN_COLUMNS, bands);
-            clipped.add(Shape::mesh(mesh));
         }
     }
     painter.text(
@@ -300,12 +334,56 @@ fn draw_spectrum_lane(
     }
 }
 
-/// A lane's name in its top left corner.
-fn lane_label(painter: &Painter, lane: Rect, name: &str) {
-    let galley = painter.layout_no_wrap(name.to_owned(), font(10.0), TEXT);
-    let tag = Rect::from_min_size(lane.min + vec2(6.0, 6.0), galley.size() + vec2(10.0, 4.0));
-    painter.rect_filled(tag, 3.0, alpha(Color32::BLACK, 0.55));
-    painter.galley(tag.min + vec2(5.0, 2.0), galley, TEXT);
+/// One lane of an overlaid signal's spectrum history as ridge lines in `color`, older
+/// rows fainter, without hiding the ridges behind.
+fn draw_ridge_lines(
+    clipped: &Painter,
+    camera: &Camera,
+    (surface, lane): (&SurfaceFrame, usize),
+    settings: &SurfaceSettings,
+    (level, color): (&dyn Fn(f32) -> f32, Color32),
+) {
+    let bands = surface.bands;
+    let depth = settings.depth.count();
+    let rows = surface.rows.len().min(depth);
+    let skip = surface.rows.len() - rows;
+    let band_range = lane * bands..(lane + 1) * bands;
+    let z_of = |row: usize| -1.0 + 2.0 * (rows - 1 - row) as f32 / (depth - 1) as f32;
+    let x_of = |band: usize| -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
+    for (row, levels) in surface.rows.iter().skip(skip).enumerate() {
+        let z = z_of(row);
+        let recent = row as f32 / (rows.max(2) - 1) as f32;
+        let points: Vec<Pos2> = levels[band_range.clone()]
+            .iter()
+            .enumerate()
+            .map(|(band, db)| camera.screen([x_of(band), level(*db) * HEIGHT, z]))
+            .collect();
+        clipped.add(Shape::line(
+            points,
+            stroke(0.8 + 0.6 * recent, alpha(color, 0.25 + 0.75 * recent)),
+        ));
+    }
+}
+
+/// An overlaid signal's stereogram as lines across the stereo positions of each band.
+fn draw_stereogram_lines(
+    clipped: &Painter,
+    camera: &Camera,
+    surface: &SurfaceFrame,
+    (level, color): (&dyn Fn(f32) -> f32, Color32),
+) {
+    let bands = surface.bands;
+    for band in 0..bands {
+        let z = -1.0 + 2.0 * band as f32 / (bands - 1) as f32;
+        let points: Vec<Pos2> = (0..PAN_COLUMNS)
+            .map(|column| {
+                let value = level(surface.stereo_db[band * PAN_COLUMNS + column]);
+                let x = -1.0 + 2.0 * column as f32 / (PAN_COLUMNS - 1) as f32;
+                camera.screen([x, value * HEIGHT, z])
+            })
+            .collect();
+        clipped.add(Shape::line(points, stroke(1.0, alpha(color, 0.85))));
+    }
 }
 
 /// `color` darkened by `factor` (one keeps it).

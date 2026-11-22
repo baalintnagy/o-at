@@ -1,6 +1,6 @@
 [package]
 name = "o-aud-a"
-version = "0.4.5"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["baalintnagy"]
@@ -21,6 +21,7 @@ required-features = ["standalone"]
 standalone = ["nih_plug/standalone"]
 
 [dependencies]
+audbus = { path = "../audbus" }
 aud-ui = { path = "../aud-ui", features = ["nih-plug"] }
 # Same revisions as nih_plug_egui; the editor window is O-AUD-A's own, so it can resize
 # itself (see src/window.rs).

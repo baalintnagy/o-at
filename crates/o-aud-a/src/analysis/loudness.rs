@@ -24,6 +24,8 @@ const HISTOGRAM_BINS: usize =
 
 /// Interpolation taps per output phase of the true-peak oversampler.
 const TRUE_PEAK_TAPS: usize = 16;
+/// Most output phases of the true-peak oversampler: 4× oversampling.
+const TRUE_PEAK_MAX_PHASES: usize = 4;
 
 /// Converts a K-weighted mean square to LUFS.
 pub fn power_to_lufs(power: f64) -> f32 {
@@ -116,10 +118,13 @@ impl KWeighting {
 /// below 192 kHz, none above.
 #[derive(Clone, Debug)]
 struct TruePeak {
-    /// `phases × TRUE_PEAK_TAPS` coefficients.
-    coefficients: Vec<f64>,
+    /// The taps of each phase; the first `phases` are used.
+    coefficients: [[f64; TRUE_PEAK_TAPS]; TRUE_PEAK_MAX_PHASES],
     phases: usize,
-    history: [f64; TRUE_PEAK_TAPS],
+    /// The input twice over, so the newest [`TRUE_PEAK_TAPS`] samples are always one
+    /// slice from `position`, newest first, without shifting the history.
+    history: [f64; 2 * TRUE_PEAK_TAPS],
+    position: usize,
 }
 
 impl TruePeak {
@@ -149,35 +154,44 @@ impl TruePeak {
                 sinc * window
             })
             .collect();
-        let mut coefficients = vec![0.0; length];
-        for phase in 0..phases {
-            let taps: Vec<f64> = (0..TRUE_PEAK_TAPS)
-                .map(|tap| prototype[tap * phases + phase])
-                .collect();
-            let sum: f64 = taps.iter().sum();
-            for (tap, value) in taps.iter().enumerate() {
-                coefficients[phase * TRUE_PEAK_TAPS + tap] = value / sum;
+        let mut coefficients = [[0.0; TRUE_PEAK_TAPS]; TRUE_PEAK_MAX_PHASES];
+        for (phase, taps) in coefficients.iter_mut().enumerate().take(phases) {
+            for (tap, value) in taps.iter_mut().enumerate() {
+                *value = prototype[tap * phases + phase];
             }
+            let sum: f64 = taps.iter().sum();
+            taps.iter_mut().for_each(|value| *value /= sum);
         }
         Self {
             coefficients,
             phases,
-            history: [0.0; TRUE_PEAK_TAPS],
+            history: [0.0; 2 * TRUE_PEAK_TAPS],
+            position: 0,
         }
     }
 
     /// Feeds a sample and returns the highest absolute interpolated value.
     fn process(&mut self, input: f64) -> f64 {
-        self.history.copy_within(..TRUE_PEAK_TAPS - 1, 1);
-        self.history[0] = input;
+        self.position = if self.position == 0 {
+            TRUE_PEAK_TAPS - 1
+        } else {
+            self.position - 1
+        };
+        self.history[self.position] = input;
+        self.history[self.position + TRUE_PEAK_TAPS] = input;
         if self.phases == 1 {
             return input.abs();
         }
-        self.coefficients
-            .chunks_exact(TRUE_PEAK_TAPS)
+        let Ok(recent) = <&[f64; TRUE_PEAK_TAPS]>::try_from(
+            &self.history[self.position..self.position + TRUE_PEAK_TAPS],
+        ) else {
+            return input.abs();
+        };
+        self.coefficients[..self.phases]
+            .iter()
             .map(|taps| {
                 taps.iter()
-                    .zip(&self.history)
+                    .zip(recent)
                     .map(|(tap, sample)| tap * sample)
                     .sum::<f64>()
                     .abs()
