@@ -7,20 +7,25 @@ mod oscilloscope;
 mod overview;
 mod plot;
 mod sonogram;
+mod sources;
 mod spectrum;
 mod stereo;
 mod surface;
+
+use std::mem;
 
 use aud_ui::theme::{ALERT, BORDER, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, alpha, mono, stroke};
 use aud_ui::widgets::{button, pill, segmented, title};
 use egui::{Align2, CornerRadius, CursorIcon, Id, Key, Rect, Sense, StrokeKind, Ui, pos2, vec2};
 
-use crate::analysis::spectrum::SonogramFeed;
-use crate::analysis::{AnalysisShared, Published};
+use crate::analysis::bus::SourceReading;
+use crate::analysis::{AnalysisShared, Published, SignalReading};
 use crate::layout::Module;
-use crate::settings::{AnalyzerSettings, Choice, Signal, SonogramSettings, Tab};
-use crate::view::colormap::Colors;
+use crate::settings::{AnalyzerSettings, Choice, Tab};
+use crate::sources::SourceList;
+use crate::view::colormap::{Colors, paint};
 use crate::view::plot::set_colors;
+use crate::view::sources::{Trace, traces};
 use crate::window::WindowState;
 
 /// Default logical editor size in pixels.
@@ -47,6 +52,11 @@ pub struct ViewState {
     theme_open: bool,
     /// Whether the overview's VIEWS panel is open.
     views_open: bool,
+    sources_open: bool,
+    /// The bus sources, as last read from the analyzer.
+    sources: SourceList,
+    /// A bus name being typed in the SOURCES panel.
+    bus_draft: String,
     /// The open view popup.
     menu: Option<menu::ViewMenu>,
     /// The tab view popups open with: the one used last.
@@ -61,6 +71,104 @@ pub struct ViewState {
     oscilloscope: oscilloscope::OscilloscopeView,
     surface: surface::SurfaceView,
     overview: overview::OverviewState,
+    /// The views' state for each bus, in the order of `data.sources`.
+    buses: Vec<BusViews>,
+}
+
+/// The editor state of one bus's views; the image and envelope rings only once the bus
+/// sends them.
+#[derive(Default)]
+struct BusViews {
+    name: String,
+    sonogram: Option<sonogram::SonogramView>,
+    spectral: Option<sonogram::SonogramView>,
+    oscilloscope: Option<oscilloscope::OscilloscopeView>,
+    stereo: stereo::StereoView,
+}
+
+impl BusViews {
+    /// Takes the new sonogram columns and envelope buckets out of `signal`.
+    fn take(&mut self, signal: &mut SignalReading) {
+        for (view, feed) in [
+            (&mut self.sonogram, &mut signal.sonogram),
+            (&mut self.spectral, &mut signal.spectral),
+        ] {
+            if view.is_some() || feed.generation != 0 {
+                view.get_or_insert_with(Default::default).take_columns(feed);
+            }
+        }
+        if self.oscilloscope.is_some() || !signal.envelope.is_empty() {
+            self.oscilloscope
+                .get_or_insert_with(Default::default)
+                .take_envelope(signal);
+        }
+    }
+
+    fn sonogram(&mut self) -> &mut sonogram::SonogramView {
+        self.sonogram.get_or_insert_with(Default::default)
+    }
+
+    fn spectral(&mut self) -> &mut sonogram::SonogramView {
+        self.spectral.get_or_insert_with(Default::default)
+    }
+
+    fn oscilloscope(&mut self) -> &mut oscilloscope::OscilloscopeView {
+        self.oscilloscope.get_or_insert_with(Default::default)
+    }
+
+    fn stereo(&mut self) -> &mut stereo::StereoView {
+        &mut self.stereo
+    }
+}
+
+/// Keeps one [`BusViews`] per bus, by name, and hands each its new data.
+fn take_bus_views(buses: &mut Vec<BusViews>, sources: &mut [SourceReading]) {
+    let same = buses
+        .iter()
+        .map(|views| views.name.as_str())
+        .eq(sources.iter().map(|reading| reading.name.as_str()));
+    if !same {
+        let mut previous = mem::take(buses);
+        *buses = sources
+            .iter()
+            .map(|reading| {
+                previous
+                    .iter()
+                    .position(|views| views.name == reading.name)
+                    .map_or_else(
+                        || BusViews {
+                            name: reading.name.clone(),
+                            ..BusViews::default()
+                        },
+                        |index| previous.remove(index),
+                    )
+            })
+            .collect();
+    }
+    for (views, reading) in buses.iter_mut().zip(sources) {
+        views.take(&mut reading.signal);
+    }
+}
+
+/// One view state per trace: `input`'s for the input, `pick` of the bus's for a bus.
+/// Traces are in list order, as `buses` is.
+fn trace_views<'v, T>(
+    traces: &[Trace<'_>],
+    input: &'v mut T,
+    buses: &'v mut [BusViews],
+    pick: fn(&mut BusViews) -> &mut T,
+) -> Vec<&'v mut T> {
+    let mut input = Some(input);
+    let mut buses = buses.iter_mut().enumerate();
+    traces
+        .iter()
+        .filter_map(|trace| match trace.bus {
+            None => input.take(),
+            Some((index, _)) => buses
+                .find(|(position, _)| *position == index)
+                .map(|(_, views)| pick(views)),
+        })
+        .collect()
 }
 
 /// Draws the editor into `rect`.
@@ -74,10 +182,11 @@ pub fn draw(
     shared.mark_viewed();
     let elapsed_s = ui.input(|input| input.stable_dt).min(0.1);
     if !state.frozen {
-        shared.with_published(|published| take(&mut state.data, published));
-        state.sonogram.take_columns(&mut state.data.sonogram);
-        state.spectral.take_columns(&mut state.data.spectral);
-        state.oscilloscope.take_envelope(&mut state.data);
+        shared.with_published(|published| state.data.take_from(published));
+        state.sonogram.take_columns(&mut state.data.input.sonogram);
+        state.spectral.take_columns(&mut state.data.input.spectral);
+        state.oscilloscope.take_envelope(&mut state.data.input);
+        take_bus_views(&mut state.buses, &mut state.data.sources);
     }
     if state.data.dropped_frames != state.last_dropped {
         state.last_dropped = state.data.dropped_frames;
@@ -90,9 +199,11 @@ pub fn draw(
     settings.upgrade();
     let colors = Colors::new(&settings);
     set_colors(ui.ctx(), colors);
+    let sources_before = shared.sources();
+    state.sources.clone_from(&sources_before);
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
     let header = Rect::from_min_size(inner.min, vec2(inner.width(), HEADER_HEIGHT));
-    let (theme_button, views_button) =
+    let [sources_button, theme_button, views_button] =
         draw_header(ui, header, state, &mut settings, (&colors, window));
     let body = Rect::from_min_max(
         pos2(
@@ -102,7 +213,18 @@ pub fn draw(
         pos2(inner.right(), rect.bottom() - MARGIN),
     );
     let mut page = draw_page(ui, body, state, &mut settings, &colors);
-    let popover_open = state.theme_open || state.views_open || state.menu.is_some();
+    let popover_open =
+        state.theme_open || state.views_open || state.sources_open || state.menu.is_some();
+    if state.sources_open {
+        let input_color = paint(settings.styles.spectrum.first);
+        state.sources_open = sources::sources_panel(
+            ui.ctx(),
+            sources_button,
+            (&mut state.sources, &mut state.bus_draft),
+            &state.data,
+            (&colors, input_color),
+        );
+    }
     if state.theme_open {
         state.theme_open = menu::theme_panel(ui.ctx(), theme_button, &mut settings, &colors);
     }
@@ -111,12 +233,20 @@ pub fn draw(
             && menu::views_panel(ui.ctx(), views_button, &mut settings.overview, &colors);
     }
     if let Some(open) = state.menu {
-        let (still_open, actions) =
-            menu::view_menu(ui.ctx(), open, &mut state.menu_tab, &mut settings, &colors);
+        let (still_open, actions) = menu::view_menu(
+            ui.ctx(),
+            open,
+            &mut state.menu_tab,
+            (&mut settings, &mut state.sources),
+            &colors,
+        );
         if !still_open {
             state.menu = None;
         }
         page = page.or(actions);
+    }
+    if state.sources != sources_before {
+        shared.set_sources(state.sources.clone());
     }
     resize_grip(ui, rect, window, &colors);
     let (f11, escape) =
@@ -133,37 +263,6 @@ pub fn draw(
     if settings != before {
         shared.edit_settings(|stored| *stored = settings);
     }
-}
-
-/// Copies new results, handing over the sonogram columns.
-fn take(data: &mut Published, published: &mut Published) {
-    if data.sequence == published.sequence {
-        return;
-    }
-    data.sample_rate = published.sample_rate;
-    data.channels = published.channels;
-    data.spectrum.clone_from(&published.spectrum);
-    take_feed(&mut data.sonogram, &mut published.sonogram);
-    take_feed(&mut data.spectral, &mut published.spectral);
-    data.surface.clone_from(&published.surface);
-    data.scope.clone_from(&published.scope);
-    data.stereo = published.stereo;
-    data.loudness = published.loudness;
-    data.loudness_history
-        .clone_from(&published.loudness_history);
-    data.envelope_generation = published.envelope_generation;
-    data.envelope.extend(published.envelope.drain(..));
-    data.dropped_frames = published.dropped_frames;
-    data.sequence = published.sequence;
-}
-
-/// Copies a sonogram feed, handing over its columns.
-fn take_feed(data: &mut SonogramFeed, published: &mut SonogramFeed) {
-    data.generation = published.generation;
-    data.range_hz = published.range_hz;
-    data.scale = published.scale;
-    data.lanes = published.lanes;
-    data.columns.extend(published.columns.drain(..));
 }
 
 /// Resets requested by the user.
@@ -183,14 +282,15 @@ impl Actions {
     }
 }
 
-/// Draws the header and the page tabs; returns the THEME and VIEWS buttons' rectangles.
+/// Draws the header and the page tabs; returns the SOURCES, THEME and VIEWS buttons'
+/// rectangles.
 fn draw_header(
     ui: &mut Ui,
     rect: Rect,
     state: &mut ViewState,
     settings: &mut AnalyzerSettings,
     (colors, window): (&Colors, &WindowState),
-) -> (Rect, Rect) {
+) -> [Rect; 3] {
     title(ui, rect, "O-AUD-A", "Audio Analyzer", colors.accent);
     let centre_y = rect.center().y;
     let full = Rect::from_min_size(pos2(rect.right() - 96.0, centre_y - 11.0), vec2(96.0, 22.0));
@@ -247,9 +347,34 @@ fn draw_header(
     {
         state.theme_open = !state.theme_open;
         state.views_open = false;
+        state.sources_open = false;
         state.menu = None;
     }
-    let data = &state.data;
+    let sources_button = Rect::from_min_size(
+        pos2(theme_button.left() - 92.0, centre_y - 11.0),
+        vec2(84.0, 22.0),
+    );
+    let label = match state.sources.buses.len() {
+        0 => String::from("SOURCES"),
+        count => format!("SOURCES {count}"),
+    };
+    if button(
+        ui,
+        Id::new("sources"),
+        sources_button,
+        &label,
+        colors.accent,
+        state.sources_open,
+    )
+    .on_hover_text("Analyze buses from O-AUD-TX next to the input")
+    .clicked()
+    {
+        state.sources_open = !state.sources_open;
+        state.theme_open = false;
+        state.views_open = false;
+        state.menu = None;
+    }
+    let data = &state.data.input;
     let (status, color, lit) = if data.sample_rate == 0 {
         ("INACTIVE", TEXT_FAINT, false)
     } else if state.overload_s > 0.0 {
@@ -262,7 +387,7 @@ fn draw_header(
         ("NO SIGNAL", TEXT_DIM, false)
     };
     let status_rect = Rect::from_min_size(
-        pos2(theme_button.left() - 104.0, centre_y - 9.0),
+        pos2(sources_button.left() - 104.0, centre_y - 9.0),
         vec2(92.0, 18.0),
     );
     pill(ui, status_rect, status, color, lit);
@@ -310,6 +435,7 @@ fn draw_header(
         {
             state.views_open = !state.views_open;
             state.theme_open = false;
+            state.sources_open = false;
             state.menu = None;
         }
         views_button.left() - GAP
@@ -321,7 +447,7 @@ fn draw_header(
         tabs.center().y,
         stroke(1.0, BORDER),
     );
-    (theme_button, views_button)
+    [sources_button, theme_button, views_button]
 }
 
 /// The view a page shows; `None` for the overview.
@@ -409,61 +535,85 @@ fn draw_module(
         });
         state.theme_open = false;
         state.views_open = false;
+        state.sources_open = false;
     }
     let mut actions = Actions::default();
     let styles = &settings.styles;
-    let data = &state.data;
+    let input_color = paint(styles.spectrum.first);
+    let ViewState {
+        data,
+        sources: list,
+        buses,
+        frozen,
+        spectrum: spectrum_view,
+        sonogram: sonogram_view,
+        spectral: spectral_view,
+        stereo: stereo_view,
+        oscilloscope: scope_view,
+        surface: surface_view,
+        ..
+    } = state;
+    let (data, list, frozen) = (&*data, &*list, *frozen);
+    let traces = traces(list, data, module, input_color);
     match module {
         Module::Spectrum => spectrum::draw(
             ui,
             rect,
-            &mut state.spectrum,
-            data,
-            &mut settings.spectrum,
+            spectrum_view,
+            &traces,
+            (&mut settings.spectrum, list),
             (colors, &styles.spectrum),
             compact,
         ),
-        Module::Sonogram => sonogram::draw(
-            ui,
-            rect,
-            &mut state.sonogram,
-            data,
-            &settings.sonogram,
-            (colors, &styles.sonogram),
-            compact,
-        ),
-        Module::Spectral => sonogram::draw_spectral(
-            ui,
-            rect,
-            &mut state.spectral,
-            data,
-            (&settings.spectral_sonogram(), &settings.spectral),
-            (colors, &styles.spectral),
-        ),
-        Module::Stereo => stereo::draw(
-            ui,
-            rect,
-            &mut state.stereo,
-            data,
-            &mut settings.stereo,
-            (colors, &styles.stereo),
-            compact,
-            state.frozen,
-        ),
-        Module::Oscilloscope => oscilloscope::draw(
-            ui,
-            rect,
-            &mut state.oscilloscope,
-            data,
-            &mut settings.oscilloscope,
-            (colors, &styles.oscilloscope),
-            state.frozen,
-        ),
+        Module::Sonogram => {
+            let mut views = trace_views(&traces, sonogram_view, buses, BusViews::sonogram);
+            sonogram::draw(
+                ui,
+                rect,
+                (&mut views, &traces),
+                &settings.sonogram,
+                (colors, &styles.sonogram),
+                compact,
+            );
+        }
+        Module::Spectral => {
+            let mut views = trace_views(&traces, spectral_view, buses, BusViews::spectral);
+            sonogram::draw_spectral(
+                ui,
+                rect,
+                (&mut views, &traces),
+                (&settings.spectral_sonogram(), &settings.spectral),
+                (colors, &styles.spectral),
+            );
+        }
+        Module::Stereo => {
+            let mut views = trace_views(&traces, stereo_view, buses, BusViews::stereo);
+            stereo::draw(
+                ui,
+                rect,
+                (&mut views, &traces, data.sequence),
+                &mut settings.stereo,
+                (colors, &styles.stereo),
+                compact,
+                frozen,
+            );
+        }
+        Module::Oscilloscope => {
+            let mut views = trace_views(&traces, scope_view, buses, BusViews::oscilloscope);
+            oscilloscope::draw(
+                ui,
+                rect,
+                (&mut views, &traces, data.sequence),
+                &mut settings.oscilloscope,
+                (colors, &styles.oscilloscope),
+                frozen,
+            );
+        }
         Module::Loudness => {
             actions.reset_loudness = loudness::draw(
                 ui,
                 rect,
-                data,
+                &traces,
                 &mut settings.loudness,
                 (colors, &styles.loudness),
                 compact,
@@ -472,10 +622,10 @@ fn draw_module(
         Module::Surface => surface::draw(
             ui,
             rect,
-            &mut state.surface,
-            data,
+            surface_view,
+            &traces,
             &mut settings.surface,
-            (colors, &styles.surface, lane_names(&settings.sonogram)),
+            (colors, &styles.surface, settings.sonogram.lane_names()),
         ),
     }
     settings_button(ui, rect, module, state, colors);
@@ -505,6 +655,7 @@ fn settings_button(
         });
         state.theme_open = false;
         state.views_open = false;
+        state.sources_open = false;
     }
     let lit = open || response.hovered();
     let painter = ui.painter();
@@ -539,13 +690,4 @@ fn settings_button_rect(panel: Rect) -> Rect {
         ),
         vec2(SETTINGS_BUTTON_WIDTH, 18.0),
     )
-}
-
-/// Names of the sonogram lanes' signals; the second is empty with one lane.
-fn lane_names(sonogram: &SonogramSettings) -> [&'static str; 2] {
-    let (first, second) = sonogram.signals();
-    [
-        Signal::LABELS[first.index()],
-        second.map_or("", |signal| Signal::LABELS[signal.index()]),
-    ]
 }

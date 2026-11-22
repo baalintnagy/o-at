@@ -61,7 +61,7 @@ impl DelayLine {
         for (sample, target) in input.iter().zip(output.iter_mut()) {
             *target = self.buffer[self.position];
             self.buffer[self.position] = *sample;
-            self.position = (self.position + 1) % self.delay;
+            self.advance();
         }
     }
 
@@ -72,7 +72,16 @@ impl DelayLine {
         }
         for sample in samples.iter_mut() {
             swap(&mut self.buffer[self.position], sample);
-            self.position = (self.position + 1) % self.delay;
+            self.advance();
+        }
+    }
+
+    /// Moves to the next slot of the line, wrapping after `delay` slots without a
+    /// division per sample.
+    fn advance(&mut self) {
+        self.position += 1;
+        if self.position == self.delay {
+            self.position = 0;
         }
     }
 }

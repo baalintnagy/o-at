@@ -75,9 +75,11 @@ O-AUD-A lives in `crates/o-aud-a`; see [docs/o-aud-a.md](docs/o-aud-a.md). Its
 `Plugin::process` only calls `Capture::push`, which copies the input into an `rtrb`
 ring and must stay real-time safe. All measurements run on the analysis worker, which
 may allocate; the editor reads its results through a mutex that the audio thread never
-takes. Run `cargo test -p o-aud-a` (a debug build, with allocation checks) after
+takes. The worker also reads the buses listed under SOURCES straight from shared
+memory; keep bus reading off the audio thread. Run `cargo test -p o-aud-a` (a debug build, with allocation checks) after
 changing the capture path. Its settings are persisted by serde variant and field names
-under `#[persist = "settings"]`: never rename them. O-AUD-A opens its own editor
+under `#[persist = "settings"]`, and its bus sources under `#[persist = "sources"]`:
+never rename them. O-AUD-A opens its own editor
 window (`crates/o-aud-a/src/window.rs`) so it can resize itself; keep it in step with
 `nih_plug_egui` when updating NIH-plug.
 

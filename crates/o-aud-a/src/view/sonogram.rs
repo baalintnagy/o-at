@@ -1,24 +1,26 @@
 //! The sonogram, a scrolling time × frequency image with the newest column on the
 //! right, and the spectral view, which overlays the waveform on it as in spectral
-//! editors. Both show one signal, or two in lanes stacked one above the other.
+//! editors. Both show one signal's levels, or two in lanes stacked one above the other.
+//! Several shown signals (the input and buses) overlay their images, each tinted in its
+//! color.
 
 use aud_ui::theme::{TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
 use egui::{
     Align2, Color32, ColorImage, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, TextureHandle,
-    TextureOptions, Ui, pos2, vec2,
+    TextureOptions, Ui, pos2,
 };
 
-use crate::analysis::Published;
 use crate::analysis::fft::FLOOR_DB;
 use crate::analysis::spectrum::{SONOGRAM_ROWS, SonogramFeed, WaveExtent};
-use crate::settings::{Choice, Signal, SonogramSettings, SpectralSettings, WaveScale};
+use crate::settings::{Signal, SonogramSettings, SpectralSettings, WaveScale};
 use crate::style::{HeatStyle, SonogramStyle, SpectralStyle};
 use crate::view::colormap::{Colors, Palette, lighten, rgb};
 use crate::view::plot::{
-    FreqAxis, Header, format_db, format_hz_precise, freq_grid_horizontal, note_name,
-    plot_background, tooltip,
+    FreqAxis, Header, format_db, format_hz_precise, freq_grid_horizontal, lane_label, message,
+    note_name, plot_background, tooltip,
 };
+use crate::view::sources::{NO_SIGNALS, Trace, name_traces};
 
 /// Columns kept in the image.
 const COLUMNS: usize = 1_024;
@@ -28,6 +30,8 @@ const MAX_LANES: usize = 2;
 const LANE_GAP: f32 = 6.0;
 /// Lowest level of the waveform's dB scale, at the centre line.
 const WAVE_FLOOR_DB: f32 = -60.0;
+/// Share of the color scale that fades out in overlaid images.
+const OVERLAY_FADE: f32 = 0.2;
 
 /// The colored image of the levels.
 #[derive(Default)]
@@ -35,6 +39,8 @@ struct Image {
     palette: Palette,
     /// Maps levels to the color scale.
     tone: SonogramSettings,
+    /// White with the level as opacity, to be tinted, instead of the heat map.
+    overlay: bool,
     /// One texture with the lanes one above the other.
     texture: Option<TextureHandle>,
     /// Columns written into the levels when this image was last uploaded.
@@ -106,13 +112,21 @@ impl SonogramView {
         lane * SONOGRAM_ROWS + (SONOGRAM_ROWS - 1 - row)
     }
 
+    fn texel(&self, image: &Image, column: usize, lane: usize, row: usize) -> Color32 {
+        let tone = image.tone.tone(self.level(column, lane, row));
+        if image.overlay {
+            let opacity = ((tone - OVERLAY_FADE) / (1.0 - OVERLAY_FADE)).clamp(0.0, 1.0);
+            Color32::from_white_alpha((opacity * 255.0).round() as u8)
+        } else {
+            image.palette.image_color(tone)
+        }
+    }
+
     fn column_image(&self, image: &Image, column: usize) -> ColorImage {
         let mut pixels = ColorImage::new([1, IMAGE_ROWS], Color32::TRANSPARENT);
         for lane in 0..MAX_LANES {
             for row in 0..SONOGRAM_ROWS {
-                pixels.pixels[Self::image_row(lane, row)] = image
-                    .palette
-                    .image_color(image.tone.tone(self.level(column, lane, row)));
+                pixels.pixels[Self::image_row(lane, row)] = self.texel(image, column, lane, row);
             }
         }
         pixels
@@ -123,17 +137,17 @@ impl SonogramView {
         for column in 0..COLUMNS {
             for lane in 0..MAX_LANES {
                 for row in 0..SONOGRAM_ROWS {
-                    pixels.pixels[Self::image_row(lane, row) * COLUMNS + column] = image
-                        .palette
-                        .image_color(image.tone.tone(self.level(column, lane, row)));
+                    pixels.pixels[Self::image_row(lane, row) * COLUMNS + column] =
+                        self.texel(image, column, lane, row);
                 }
             }
         }
         pixels
     }
 
-    /// Uploads what changed in the image, colored with `heat` and `tone`.
-    fn update(&mut self, ui: &Ui, heat: HeatStyle, tone: &SonogramSettings) {
+    /// Uploads what changed in the image, colored with `heat` and `tone`, or as a tintable
+    /// `overlay`.
+    fn update(&mut self, ui: &Ui, heat: HeatStyle, tone: &SonogramSettings, overlay: bool) {
         let toned = |settings: &SonogramSettings| {
             (settings.range, settings.brightness_db, settings.contrast)
         };
@@ -145,6 +159,10 @@ impl SonogramView {
             }
             if toned(tone) != toned(&image.tone) {
                 image.tone = *tone;
+                image.stale = true;
+            }
+            if overlay != image.overlay {
+                image.overlay = overlay;
                 image.stale = true;
             }
         }
@@ -242,23 +260,8 @@ fn lane_at(lanes: &[Rect], pointer: Pos2) -> Option<(usize, f32)> {
         })
 }
 
-/// Names of the lanes' signals.
-fn lane_names(settings: &SonogramSettings) -> [&'static str; MAX_LANES] {
-    let (first, second) = settings.signals();
-    [
-        Signal::LABELS[first.index()],
-        second.map_or("", |signal| Signal::LABELS[signal.index()]),
-    ]
-}
-
-/// A lane's name in its top left corner, when there are two.
-fn lane_label(painter: &Painter, lane: Rect, name: &str) {
-    let galley = painter.layout_no_wrap(name.to_owned(), font(10.0), TEXT);
-    let size = galley.size();
-    let tag = Rect::from_min_size(lane.min + vec2(4.0, 4.0), size + vec2(10.0, 4.0));
-    painter.rect_filled(tag, 3.0, alpha(Color32::BLACK, 0.55));
-    painter.galley(tag.min + vec2(5.0, 2.0), galley, TEXT);
-}
+/// Inset of a lane's name tag in logical pixels.
+const LABEL_INSET: f32 = 4.0;
 
 /// Shown time in seconds.
 fn span_s(settings: &SonogramSettings) -> f32 {
@@ -301,7 +304,7 @@ fn freq_axis(feed: &SonogramFeed) -> Option<FreqAxis> {
 
 /// Header text variants, longest first.
 fn info(settings: &SonogramSettings) -> [String; 3] {
-    let [first, second] = lane_names(settings);
+    let [first, second] = settings.lane_names();
     let signals = if second.is_empty() {
         first.to_lowercase()
     } else {
@@ -318,45 +321,79 @@ fn info(settings: &SonogramSettings) -> [String; 3] {
     ]
 }
 
-/// Draws the sonogram panel.
+/// The title, the shown signals and the analysis settings in a panel's header.
+fn header(
+    painter: &Painter,
+    rect: Rect,
+    title: &str,
+    traces: &[Trace<'_>],
+    settings: &SonogramSettings,
+) {
+    let mut header = Header::new(painter, rect, title);
+    name_traces(&mut header, traces);
+    header.left_text(&info(settings), font(10.0), TEXT_DIM);
+}
+
+/// A message across the plot: no signals chosen, or no image yet of the only one.
+fn waiting(painter: &Painter, plot: Rect, traces: &[Trace<'_>], feed: impl Fn(&Trace<'_>) -> u64) {
+    let text = match traces {
+        [] => NO_SIGNALS.to_owned(),
+        [only] if feed(only) == 0 => only.waiting_text(),
+        _ => return,
+    };
+    message(painter, plot, text);
+}
+
+/// Draws the sonogram panel of `traces`, each with its view, overlaid when there are
+/// several.
 pub fn draw(
     ui: &mut Ui,
     rect: Rect,
-    view: &mut SonogramView,
-    data: &Published,
+    (views, traces): (&mut [&mut SonogramView], &[Trace<'_>]),
     settings: &SonogramSettings,
     (colors, style): (&Colors, &SonogramStyle),
     compact: bool,
 ) {
     panel(ui, rect, "SONOGRAM", colors.accent);
-    let legend_width = if compact { 0.0 } else { 46.0 };
+    let overlay = traces.len() > 1;
+    let legend_width = if compact || overlay { 0.0 } else { 46.0 };
     let plot = Rect::from_min_max(
         pos2(rect.left() + 40.0, rect.top() + 34.0),
         pos2(rect.right() - 12.0 - legend_width, rect.bottom() - 24.0),
     );
     let painter = ui.painter_at(rect);
-    view.update(ui, style.heat, settings);
-    let lanes = lane_rects(plot, view.lanes);
-    let names = lane_names(settings);
-    let axis = freq_axis(&data.sonogram);
+    views
+        .iter_mut()
+        .for_each(|view| view.update(ui, style.heat, settings, overlay));
+    let lanes = lane_rects(plot, views.first().map_or(1, |view| view.lanes));
+    let names = settings.lane_names();
+    let axis = traces
+        .first()
+        .and_then(|trace| freq_axis(&trace.signal.sonogram));
     for (index, lane) in lanes.iter().enumerate() {
         plot_background(&painter, *lane);
-        view.draw_image(&painter, *lane, index, Color32::WHITE);
+        for (view, trace) in views.iter().zip(traces) {
+            let tint = if overlay { trace.color } else { Color32::WHITE };
+            view.draw_image(&painter, *lane, index, tint);
+        }
         if let Some(axis) = axis {
             freq_grid_horizontal(&painter, *lane, axis, true);
         }
         if lanes.len() > 1 {
-            lane_label(&painter, *lane, names[index]);
+            lane_label(&painter, *lane, names[index], LABEL_INSET);
         }
     }
     let span_s = span_s(settings);
     time_axis(&painter, plot, span_s);
-    Header::new(&painter, rect, "SONOGRAM").left_text(&info(settings), font(10.0), TEXT_DIM);
-    let Some(axis) = axis else {
+    waiting(&painter, plot, traces, |trace| {
+        trace.signal.sonogram.generation
+    });
+    header(&painter, rect, "SONOGRAM", traces, settings);
+    let (Some(axis), Some(first)) = (axis, views.first()) else {
         return;
     };
 
-    if !compact {
+    if !compact && !overlay {
         let bar = Rect::from_min_max(
             pos2(plot.right() + 12.0, plot.top()),
             pos2(plot.right() + 22.0, plot.bottom()),
@@ -371,7 +408,7 @@ pub fn draw(
                 ),
                 pos2(bar.right(), bar.bottom() - bar.height() * fraction),
             );
-            painter.rect_filled(slice, 0.0, view.palette().color(fraction));
+            painter.rect_filled(slice, 0.0, first.palette().color(fraction));
         }
         for db in [0.0, -30.0, -60.0, -90.0, -120.0] {
             let fraction = settings.tone(db);
@@ -395,9 +432,7 @@ pub fn draw(
             return;
         };
         let x_fraction = (pointer.x - plot.left()) / plot.width();
-        let column = view.column_at(x_fraction);
         let row = (y_fraction * SONOGRAM_ROWS as f32) as usize;
-        let level = view.level(column, lane, row);
         let hz = axis.hz(y_fraction);
         let ago = (1.0 - x_fraction.clamp(0.0, 1.0)) * span_s;
         painter.hline(plot.x_range(), pointer.y, stroke(1.0, alpha(TEXT, 0.25)));
@@ -408,15 +443,15 @@ pub fn draw(
             ),
             (format!("−{ago:.2} s"), TEXT_DIM),
         ];
-        let level = format_db(level, "dB");
-        lines.push((
-            if lanes.len() > 1 {
-                format!("{} {level}", names[lane].to_lowercase())
-            } else {
-                level
-            },
-            TEXT,
-        ));
+        for (view, trace) in views.iter().zip(traces) {
+            let level = format_db(view.level(view.column_at(x_fraction), lane, row), "dB");
+            let (text, color) = match (overlay, lanes.len() > 1) {
+                (true, _) => (format!("{} {level}", trace.name), trace.color),
+                (false, true) => (format!("{} {level}", names[lane].to_lowercase()), TEXT),
+                (false, false) => (level, TEXT),
+            };
+            lines.push((text, color));
+        }
         tooltip(&painter, pointer, plot, &lines);
     }
 }
@@ -520,12 +555,12 @@ fn draw_waveform(
     painter.with_clip_rect(lane_rect).add(Shape::mesh(mesh));
 }
 
-/// Draws the spectral view: its own sonogram with the waveform of the same signal on top.
+/// Draws the spectral view of `traces`: their own sonograms with the waveforms of the
+/// same signals on top, overlaid in their colors when there are several.
 pub fn draw_spectral(
     ui: &mut Ui,
     rect: Rect,
-    view: &mut SonogramView,
-    data: &Published,
+    (views, traces): (&mut [&mut SonogramView], &[Trace<'_>]),
     (sonogram, spectral): (&SonogramSettings, &SpectralSettings),
     (colors, style): (&Colors, &SpectralStyle),
 ) {
@@ -535,44 +570,64 @@ pub fn draw_spectral(
         pos2(rect.right() - 40.0, rect.bottom() - 24.0),
     );
     let painter = ui.painter_at(rect);
-    view.update(ui, style.heat, sonogram);
+    let overlay = traces.len() > 1;
+    views
+        .iter_mut()
+        .for_each(|view| view.update(ui, style.heat, sonogram, overlay));
     let image_opacity = SpectralSettings::OPACITY.clamp(spectral.sonogram_opacity);
     let wave_opacity = SpectralSettings::OPACITY.clamp(spectral.waveform_opacity);
     let gain_db = SpectralSettings::WAVEFORM_GAIN_DB.clamp(spectral.waveform_gain_db);
-    let lanes = lane_rects(plot, view.lanes);
-    let names = lane_names(sonogram);
-    let axis = freq_axis(&data.spectral);
+    let lanes = lane_rects(plot, views.first().map_or(1, |view| view.lanes));
+    let names = sonogram.lane_names();
+    let axis = traces
+        .first()
+        .and_then(|trace| freq_axis(&trace.signal.spectral));
     let second = if sonogram.signals().1 == Some(Signal::Side) {
         style.side
     } else {
         style.right
     };
-    let wave_colors = [rgb(style.first), rgb(second)];
+    let lane_colors = [rgb(style.first), rgb(second)];
+    // One signal keeps the lane colors; overlaid signals take their own, lighter in the
+    // second lane.
+    let wave_color = |trace: &Trace<'_>, lane: usize| match (overlay, lane) {
+        (false, _) => lane_colors[lane],
+        (true, 0) => trace.color,
+        (true, _) => lighten(trace.color, 0.35),
+    };
     for (index, lane) in lanes.iter().enumerate() {
         plot_background(&painter, *lane);
         if image_opacity > 0.0 {
-            view.draw_image(&painter, *lane, index, alpha(Color32::WHITE, image_opacity));
+            for (view, trace) in views.iter().zip(traces) {
+                let tint = if overlay { trace.color } else { Color32::WHITE };
+                view.draw_image(&painter, *lane, index, alpha(tint, image_opacity));
+            }
         }
         if let Some(axis) = axis {
             freq_grid_horizontal(&painter, *lane, axis, true);
         }
         amplitude_scale(&painter, *lane, spectral.scale, gain_db);
         if wave_opacity > 0.0 {
-            draw_waveform(
-                &painter,
-                *lane,
-                (view, index),
-                spectral,
-                (wave_colors[index], wave_opacity),
-            );
+            for (view, trace) in views.iter().zip(traces) {
+                draw_waveform(
+                    &painter,
+                    *lane,
+                    (view, index),
+                    spectral,
+                    (wave_color(trace, index), wave_opacity),
+                );
+            }
         }
         if lanes.len() > 1 {
-            lane_label(&painter, *lane, names[index]);
+            lane_label(&painter, *lane, names[index], LABEL_INSET);
         }
     }
     let span_s = span_s(sonogram);
     time_axis(&painter, plot, span_s);
-    Header::new(&painter, rect, "SPECTRAL").left_text(&info(sonogram), font(10.0), TEXT_DIM);
+    waiting(&painter, plot, traces, |trace| {
+        trace.signal.spectral.generation
+    });
+    header(&painter, rect, "SPECTRAL", traces, sonogram);
     painter.text(
         pos2(plot.right() + 4.0, plot.top() - 10.0),
         Align2::LEFT_CENTER,
@@ -591,24 +646,17 @@ pub fn draw_spectral(
             return;
         };
         let x_fraction = (pointer.x - plot.left()) / plot.width();
-        let column = view.column_at(x_fraction);
         let ago = (1.0 - x_fraction.clamp(0.0, 1.0)) * span_s;
-        let wave = view.waves[column][lane];
-        let peak = wave.max.abs().max(wave.min.abs());
         let mut lines = vec![(format!("−{ago:.2} s"), TEXT)];
         if lanes.len() > 1 {
-            lines.push((names[lane].to_owned(), wave_colors[lane]));
+            lines.push((names[lane].to_owned(), lane_colors[lane]));
         }
+        let row = (y_fraction * SONOGRAM_ROWS as f32) as usize;
         if let Some(axis) = axis {
-            let row = (y_fraction * SONOGRAM_ROWS as f32) as usize;
             let hz = axis.hz(y_fraction);
             lines.push((
                 format!("{}  {}", format_hz_precise(hz), note_name(hz)),
                 TEXT_DIM,
-            ));
-            lines.push((
-                format!("level {}", format_db(view.level(column, lane, row), "dB")),
-                TEXT,
             ));
         }
         let to_db = |value: f32| {
@@ -618,14 +666,34 @@ pub fn draw_spectral(
                 FLOOR_DB
             }
         };
-        lines.push((
-            format!(
-                "peak {}  rms {}",
-                format_db(to_db(peak), "dBFS"),
-                format_db(to_db(wave.rms), "dBFS")
-            ),
-            wave_colors[lane],
-        ));
+        for (view, trace) in views.iter().zip(traces) {
+            let column = view.column_at(x_fraction);
+            let wave = view.waves[column][lane];
+            let peak = wave.max.abs().max(wave.min.abs());
+            let prefix = if overlay {
+                format!("{} ", trace.name)
+            } else {
+                String::new()
+            };
+            let color = wave_color(trace, lane);
+            if axis.is_some() {
+                lines.push((
+                    format!(
+                        "{prefix}level {}",
+                        format_db(view.level(column, lane, row), "dB")
+                    ),
+                    if overlay { color } else { TEXT },
+                ));
+            }
+            lines.push((
+                format!(
+                    "{prefix}peak {}  rms {}",
+                    format_db(to_db(peak), "dBFS"),
+                    format_db(to_db(wave.rms), "dBFS")
+                ),
+                color,
+            ));
+        }
         painter.hline(plot.x_range(), pointer.y, stroke(1.0, alpha(TEXT, 0.2)));
         painter.vline(pointer.x, plot.y_range(), stroke(1.0, alpha(TEXT, 0.2)));
         tooltip(&painter, pointer, plot, &lines);

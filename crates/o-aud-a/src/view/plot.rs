@@ -1,6 +1,6 @@
 //! Plot helpers shared by the views: axes, grids, labels and readouts.
 
-use aud_ui::theme::{BORDER, PANEL_RAISED, TEXT, TEXT_FAINT, alpha, font, mono, stroke};
+use aud_ui::theme::{BORDER, PANEL_RAISED, TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use egui::{
     Align2, Color32, Context, CornerRadius, FontId, Id, Painter, Pos2, Rect, StrokeKind, pos2, vec2,
 };
@@ -329,6 +329,48 @@ pub fn tooltip(painter: &Painter, anchor: Pos2, bounds: Rect, lines: &[(String, 
         painter.galley(pos2(rect.left() + 8.0, y), galley, TEXT);
         y += height;
     }
+}
+
+/// Highest automatic gain of the scopes.
+pub const MAX_GAIN: f32 = 1_000.0;
+/// Automatic gain rise per update, as a factor.
+const GAIN_RISE: f32 = 1.03;
+
+/// The scopes' automatic gain after an update whose loudest value is `peak`: it falls at
+/// once so the peak fills `fill` of the full scale, and rises by 3 % per update.
+pub fn follow_gain(gain: f32, peak: f32, fill: f32) -> f32 {
+    let target = if peak > 1e-6 {
+        (fill / peak).clamp(1.0, MAX_GAIN)
+    } else {
+        gain
+    };
+    if target < gain {
+        target
+    } else {
+        (gain * GAIN_RISE).min(target)
+    }
+}
+
+/// A message across the middle of `rect`, such as why a view has nothing to draw.
+pub fn message(painter: &Painter, rect: Rect, text: impl ToString) {
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        font(12.0),
+        TEXT_DIM,
+    );
+}
+
+/// A lane's name on a dark tag, `inset` pixels from the lane's top left corner.
+pub fn lane_label(painter: &Painter, lane: Rect, name: &str, inset: f32) {
+    let galley = painter.layout_no_wrap(name.to_owned(), font(10.0), TEXT);
+    let tag = Rect::from_min_size(
+        lane.min + vec2(inset, inset),
+        galley.size() + vec2(10.0, 4.0),
+    );
+    painter.rect_filled(tag, 3.0, alpha(Color32::BLACK, 0.55));
+    painter.galley(tag.min + vec2(5.0, 2.0), galley, TEXT);
 }
 
 /// Places a panel's header items after its title so they never overlap: legends and

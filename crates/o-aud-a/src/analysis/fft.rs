@@ -39,19 +39,34 @@ impl Default for History {
 impl History {
     pub fn push(&mut self, frame: [f32; 2]) {
         self.frames[self.head] = frame;
-        self.head = (self.head + 1) % self.frames.len();
+        self.head += 1;
+        if self.head == self.frames.len() {
+            self.head = 0;
+        }
     }
 
     pub fn clear(&mut self) {
         self.frames.fill([0.0; 2]);
     }
 
+    /// The last `count` frames, oldest first, as the two parts of the ring.
+    pub fn latest_slices(&self, count: usize) -> (&[[f32; 2]], &[[f32; 2]]) {
+        let count = count.min(self.frames.len());
+        if count <= self.head {
+            (&self.frames[self.head - count..self.head], &[])
+        } else {
+            let wrapped = count - self.head;
+            (
+                &self.frames[self.frames.len() - wrapped..],
+                &self.frames[..self.head],
+            )
+        }
+    }
+
     /// The last `count` frames, oldest first.
     pub fn latest(&self, count: usize) -> impl Iterator<Item = [f32; 2]> + '_ {
-        let len = self.frames.len();
-        let count = count.min(len);
-        let start = (self.head + len - count) % len;
-        (0..count).map(move |offset| self.frames[(start + offset) % len])
+        let (older, newer) = self.latest_slices(count);
+        older.iter().chain(newer).copied()
     }
 }
 
@@ -91,7 +106,8 @@ pub struct FftTap {
     planner: RealFftPlanner<f32>,
     scratch: Vec<Complex32>,
     coefficients: Vec<f32>,
-    time: Vec<f32>,
+    /// Windowed input of the left and right channel.
+    time: [Vec<f32>; 2],
     pub left: Vec<Complex32>,
     pub right: Vec<Complex32>,
     /// Power scale of a squared bin magnitude.
@@ -109,7 +125,7 @@ impl FftTap {
             forward,
             planner,
             coefficients: Vec::new(),
-            time: Vec::new(),
+            time: [Vec::new(), Vec::new()],
             left: Vec::new(),
             right: Vec::new(),
             normalization: 1.0,
@@ -136,7 +152,7 @@ impl FftTap {
         self.coefficients = window_coefficients(self.window, len);
         let sum: f32 = self.coefficients.iter().sum();
         self.normalization = 4.0 / (sum * sum);
-        self.time = vec![0.0; len];
+        self.time = [vec![0.0; len], vec![0.0; len]];
         self.left = vec![Complex32::default(); self.bins()];
         self.right = vec![Complex32::default(); self.bins()];
     }
@@ -151,25 +167,26 @@ impl FftTap {
 
     /// Transforms the latest frames of `history`.
     pub fn analyze(&mut self, history: &History) {
-        for side in 0..2 {
-            for ((time, frame), weight) in self
-                .time
-                .iter_mut()
-                .zip(history.latest(self.size.samples()))
-                .zip(&self.coefficients)
-            {
-                *time = frame[side] * weight;
-            }
-            let output = if side == 0 {
-                &mut self.left
-            } else {
-                &mut self.right
-            };
-            // Buffer lengths match the plan, so the transform cannot fail.
-            let _ = self
-                .forward
-                .process_with_scratch(&mut self.time, output, &mut self.scratch);
+        let (older, newer) = history.latest_slices(self.size.samples());
+        let [left, right] = &mut self.time;
+        // Both channels in one pass over the history.
+        for (((frame, weight), left), right) in older
+            .iter()
+            .chain(newer)
+            .zip(&self.coefficients)
+            .zip(left.iter_mut())
+            .zip(right.iter_mut())
+        {
+            *left = frame[0] * weight;
+            *right = frame[1] * weight;
         }
+        // Buffer lengths match the plan, so the transforms cannot fail.
+        let _ = self
+            .forward
+            .process_with_scratch(left, &mut self.left, &mut self.scratch);
+        let _ = self
+            .forward
+            .process_with_scratch(right, &mut self.right, &mut self.scratch);
     }
 
     /// Power of `bin` in `signal`, where a full-scale sine reads one.
@@ -273,6 +290,25 @@ mod tests {
     use std::f32::consts::TAU;
 
     use super::{BandBins, BandMap, FftTap, History, power_to_db};
+
+    #[test]
+    fn history_returns_the_latest_frames_across_the_wrap() {
+        let mut history = History::default();
+        let len = history.frames.len();
+        for n in 0..len + 10 {
+            history.push([n as f32, 0.0]);
+        }
+        let latest: Vec<f32> = history.latest(20).map(|frame| frame[0]).collect();
+        let expected: Vec<f32> = (len - 10..len + 10).map(|n| n as f32).collect();
+        assert_eq!(latest, expected);
+        let (older, newer) = history.latest_slices(5);
+        assert_eq!((older.len(), newer.len()), (5, 0), "within the newest part");
+        assert_eq!(
+            history.latest(len + 5).count(),
+            len,
+            "at most the whole ring"
+        );
+    }
     use crate::settings::{FftSize, Signal, Window};
 
     #[test]

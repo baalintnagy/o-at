@@ -2,13 +2,12 @@
 //! dragging its title and resized by dragging the gaps around it.
 
 use aud_ui::theme::{BORDER, PANEL_RAISED, TEXT, TEXT_DIM, alpha, font, stroke};
-use egui::{
-    Align2, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, pos2, vec2,
-};
+use egui::{CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, pos2, vec2};
 
 use crate::layout::{DropZone, MIN_WEIGHT, Module, OverviewLayout};
 use crate::settings::AnalyzerSettings;
 use crate::view::colormap::Colors;
+use crate::view::plot::message;
 use crate::view::{Actions, GAP, ViewState, draw_module};
 
 /// Smallest module size in logical pixels while resizing.
@@ -139,12 +138,10 @@ pub fn draw(
 
     let rows = arrange(&settings.overview, area);
     if rows.is_empty() {
-        ui.painter().text(
-            area.center(),
-            Align2::CENTER_CENTER,
+        message(
+            ui.painter(),
+            area,
             "Every view is hidden: switch one on under VIEWS",
-            font(12.0),
-            TEXT_DIM,
         );
         return Actions::default();
     }

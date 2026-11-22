@@ -15,6 +15,12 @@ screenshots of each page in [o-aud-a/](o-aud-a/).
 | Analysis worker | Drains the ring every 4 ms and runs every measurement. It may allocate. Results go to a `Published` record behind a mutex. |
 | Editor | Takes the results once per frame, keeps its own copy (kept while frozen) and draws. |
 
+`analysis::worker` runs the thread, `analysis::engine` measures one signal and
+`analysis::reading` holds what is published. The worker marks the large parts of each
+`SignalReading` it rewrote (spectrum, scope frames, 3D histories, loudness history) as
+fresh; the editor swaps in only those, so nothing is copied twice and each side reuses
+the other's previous buffers. Sonogram columns and envelope buckets are moved.
+
 The audio thread never takes the mutex, so the editor and the worker cannot block it.
 Settings travel the other way through an `RwLock` that the worker reads each round;
 the same lock is the persisted plugin state.
@@ -123,6 +129,90 @@ ITU-R BS.1770-4 and EBU R 128:
 Mono inputs count one channel. The history keeps momentary and short-term loudness
 every 100 ms for 10 minutes.
 
+The target is a preset or a custom value (`custom_lufs`, whole LUFS from −36 to −6).
+Presets are persisted by variant name and listed from loud to quiet; the four of earlier
+versions keep their names.
+
+## Streaming platforms
+
+`platforms.rs` holds one table of platforms and `Platform::playback`, which turns a
+track's integrated loudness and true peak maximum into the gain a platform applies and
+the loudness and true peak after it. Four behaviors cover them: no normalization, down
+only, up and down with the upward gain held so the true peak stays below the ceiling,
+and up and down into a limiter at the ceiling. The editor draws the table for every
+shown signal; nothing runs on the worker.
+
+| Platform | Reference | Ceiling | Behavior | Source |
+| --- | --- | --- | --- | --- |
+| Spotify | −14 LUFS | −1 dBTP | held by peak | [Spotify for Artists](https://artists.spotify.com/help/article/loudness-normalization) |
+| Spotify Loud | −11 LUFS | −1 dBTP | limiter | Spotify for Artists |
+| Spotify Quiet | −19 LUFS | −1 dBTP | held by peak | Spotify for Artists |
+| YouTube | −14 LUFS | −1 dBTP | down only | [Production Advice](https://productionadvice.co.uk/youtube-loudness/) |
+| Apple Music | −16 LUFS | −1 dBTP | held by peak | [iZotope](https://www.izotope.com/en/learn/mastering-for-streaming-platforms) |
+| Amazon Music | −14 LUFS | −2 dBTP | down only | [Meterplugs](https://www.meterplugs.com/blog/2019/10/15/loudness-penalty-amazon-deezer.html) |
+| Tidal | −14 LUFS | −1 dBTP | down only | iZotope |
+| Deezer | −15 LUFS | −1 dBTP | down only | Meterplugs |
+| SoundCloud | none | −1 dBTP | none | iZotope |
+
+Only Spotify documents its behavior; the others are third-party measurements, and
+sources disagree on details (Amazon's level, whether Apple turns quiet tracks up).
+Spotify asks for −2 dBTP on masters louder than −14 LUFS; the table keeps −1 dBTP.
+Tidal normalizes albums, not tracks. Review the table when platforms announce changes.
+
+## Sources
+
+The SOURCES panel lists buses from O-AUD-TX to measure next to the input. The list is
+persisted separately from the other settings, under `#[persist = "sources"]`, so the
+settings stay `Copy`; its fields are named and must not be renamed either.
+
+The analysis worker reads the buses itself (`analysis::bus`): no audio thread is
+involved, and nothing is resampled or clock-locked, because a source is only measured,
+not played. Each round, a `BusTap` reads everything its transmitter wrote since the last
+round with `BusReader::read`, in blocks of 4 096 frames, and feeds an `Engine` of its
+own at the bus's rate, with the input's settings. A new stream
+(another epoch) rebuilds the engine and starts at the newest audio; more than half the
+safely readable ring unread, or data overwritten while it was read, skips ahead and
+counts a gap. The tap opens the bus once a transmitter has leased the name, keeps the
+region open across transmitter restarts and renews a reader slot, so O-AUD-TX counts the
+analyzer as a receiver. Sources are measured even before the host activates the plugin.
+
+Source FFT analyses only run while the editor draws, like the input's; their loudness
+runs all the time, and RESET restarts it and the held peaks with the input's. The worker
+publishes the names of the live buses every 500 ms.
+
+Each bus is published as a `SignalReading`, the record the input has in `Published::input`. Each view shows
+the signals chosen for it in `SourceList::views`: whether the input is shown and the
+names of the buses it hides, so a listed bus appears in every view until it is hidden.
+Sessions from before per-view signals have no spectrum selection; it then hides the buses
+not marked `shown`, and it is written out on the first change.
+
+Every round the worker derives what each signal needs (`Wants`) from the views that
+show it: the spectrum stage for the spectrum and stereo views (the stereo bands), the
+scope frames for the oscilloscope and the stereo scope, the envelope for the
+oscilloscope, and the sonogram, spectral and 3D stages for their views. Loudness, its
+history and the stereo meters always run. Stages that no view needs rest; one that a
+view shows again restarts, so its image starts afresh. The input always records its
+envelope, so ROLL has a history when it is opened. Sonogram and envelope generations
+are unique across engines, so a reading that changes hands always clears.
+
+The editor keeps the view state of each bus (sonogram and envelope rings, goniometer
+trails) by name, created when the bus first sends such data. A view draws the list of
+its traces, the input first, then the buses in list order. One trace is drawn as the
+input always was. Several are overlaid: the spectrum draws the first in full and the
+first channel of the others; the sonogram and spectral images become white with the
+level as opacity and are tinted in each trace's color; the 3D views draw ridge lines per
+trace without hiding fills; the oscilloscope and the stereo scope share one gain, and
+each oscilloscope trace finds its own trigger at its own rate; the stereo view has a
+correlation meter per trace and dots per band; the loudness view overlays the
+short-term histories and lists all traces in a table.
+
+The spectrum view maps each source's bins to pixel columns with a band map of its own,
+since its FFT has another bin width when its rate differs, and keeps up to eight of
+them. With level matching, a curve moves by the difference between the input's and the
+source's integrated loudness (short-term before both are gated). Masking takes, per
+column, the two highest curves, the input's primary curve included, and shades columns
+where they are within 6 dB and above −60 dB.
+
 ## Overview and colors
 
 The overview fills the page below the tabs; the VIEWS panel, opened from the right end
@@ -185,8 +275,24 @@ the value is `(101^p − 1) / 100` at position `p`, about 9 % at mid travel.
 
 ## Testing
 
+`tests/analyzer.rs` also writes a −20 dBFS 1 kHz sine to a 44.1 kHz bus in a private
+bus namespace, with the plugin's own input never activated, and checks the source's
+state, format, spectrum peak and integrated loudness, a listed bus without transmitter,
+the bus in every view (sonogram, spectral and 3D images, scope frames, envelope, stereo
+and loudness history), and that removing a source keeps the others' measurements. It
+writes the bus in real time, since a debug build cannot run every analysis much faster.
+
+
 ```bash
 cargo test -p o-aud-a
+```
+
+`examples/throughput.rs` measures how much faster than real time the engine runs, with
+only the measurements that always run, with each FFT analysis and with every view's
+(the best of five runs each). Run it as a release build after changing the analysis:
+
+```bash
+cargo run --release -p o-aud-a --example throughput
 ```
 
 Run it as a debug build for the allocation check. The tests cover EBU Tech 3341

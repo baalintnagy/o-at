@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Module;
 use crate::settings::ColorMap;
+use crate::sources::MAX_BUSES;
 
 /// An sRGB color.
 pub type Rgb = [u8; 3];
@@ -16,6 +17,19 @@ pub type Rgb = [u8; 3];
 const fn hex(value: u32) -> Rgb {
     [(value >> 16) as u8, (value >> 8) as u8, value as u8]
 }
+
+/// Spectrum curve colors of the bus sources, in list order. Fixed, so a source keeps
+/// its color in every view.
+pub const SOURCE_COLORS: [Rgb; MAX_BUSES] = [
+    hex(0xff8a3d),
+    hex(0x3cd6c0),
+    hex(0xf5d04c),
+    hex(0xff5c7a),
+    hex(0x7bd88f),
+    hex(0x8fd3ff),
+    hex(0xffb38a),
+    hex(0xe07be0),
+];
 
 /// A color with an opacity from 0 to 1.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

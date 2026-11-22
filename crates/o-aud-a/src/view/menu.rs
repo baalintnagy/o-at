@@ -2,7 +2,7 @@
 //! the overview's VIEWS panel, and each view's popup, opened by its settings button or a right click, with a
 //! SETTINGS tab for what the view shows and a COLORS tab for how it is colored.
 
-use aud_ui::theme::{PANEL, TEXT, TEXT_DIM, TEXT_FAINT, stroke};
+use aud_ui::theme::{PANEL, TEXT, TEXT_DIM, TEXT_FAINT, font, stroke};
 use aud_ui::widgets::{button, segmented};
 use egui::color_picker::{Alpha, color_edit_button_srgba};
 use egui::{
@@ -12,12 +12,16 @@ use egui::{
 
 use crate::layout::{Module, OverviewLayout};
 use crate::settings::{
-    AnalyzerSettings, Choice, ColorMap, ColorScheme, LEVEL_RANGE_DB, Lanes, Range,
-    SonogramSettings, SpectralSettings, SpectrumSettings, SurfaceSettings, Taper,
+    AnalyzerSettings, Choice, ColorMap, ColorScheme, LEVEL_RANGE_DB, Lanes, LoudnessSettings,
+    LoudnessTarget, Range, SonogramSettings, SpectralSettings, SpectrumSettings, SurfaceSettings,
+    Taper,
 };
+use crate::sources::SourceList;
 use crate::style::{HeatStyle, Paint, PlotStyle, Rgb, ViewStyles};
 use crate::view::Actions;
 use crate::view::colormap::{Colors, rgb};
+use crate::view::plot::text_width;
+use crate::view::sources::source_color;
 
 /// Width of the menus' sliders in logical pixels.
 const SLIDER_WIDTH: f32 = 130.0;
@@ -302,7 +306,7 @@ fn draw_entries(ui: &mut Ui, id: Id, entries: Vec<Entry<'_>>) {
 }
 
 /// The frame of the menus: the panel color with the accent as border.
-fn frame(accent: Color32) -> Frame {
+pub(super) fn frame(accent: Color32) -> Frame {
     Frame::NONE
         .fill(PANEL)
         .stroke(stroke(1.0, accent))
@@ -312,7 +316,7 @@ fn frame(accent: Color32) -> Frame {
 
 /// Whether a menu at `rect` should close: Esc, or a press elsewhere while no color
 /// picker or list is open.
-fn should_close(context: &Context, rect: Rect, keep: Option<Rect>) -> bool {
+pub(super) fn should_close(context: &Context, rect: Rect, keep: Option<Rect>) -> bool {
     let picking = context.memory(|memory| memory.any_popup_open());
     context.input(|input| {
         input.key_pressed(Key::Escape)
@@ -398,6 +402,80 @@ impl SettingsGrid<'_> {
         self.ui.end_row();
     }
 
+    /// The signals a view shows, as toggles: the input and each listed bus in its color.
+    fn signals(&mut self, module: Module, list: &mut SourceList) {
+        self.caption("Signals");
+        let shown = list.shown(module);
+        let toggles: Vec<(String, bool, Option<usize>)> =
+            [(String::from("INPUT"), shown.input, None)]
+                .into_iter()
+                .chain(
+                    list.buses
+                        .iter()
+                        .enumerate()
+                        .map(|(index, bus)| (bus.name.clone(), shown.has_bus(index), Some(index))),
+                )
+                .collect();
+        let accent = self.accent;
+        let mut flipped = Vec::new();
+        self.ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(300.0);
+            for (label, on, bus) in &toggles {
+                let width = (16.0 + text_width(ui.painter(), label, &font(11.0))).max(48.0);
+                let (rect, _) = ui.allocate_exact_size(vec2(width, CONTROL_HEIGHT), Sense::hover());
+                let color = bus.map_or(accent, source_color);
+                let id = Id::new(("menu-signal", module, *bus));
+                if button(ui, id, rect, label, color, *on)
+                    .on_hover_text("Show or hide this signal here; several are overlaid")
+                    .clicked()
+                {
+                    flipped.push((*bus, !*on));
+                }
+            }
+            if list.buses.is_empty() {
+                ui.label(
+                    RichText::new("add buses under SOURCES")
+                        .size(10.0)
+                        .color(TEXT_DIM),
+                );
+            }
+        });
+        for (bus, on) in flipped {
+            match bus {
+                None => list.show_input(module, on),
+                Some(index) => list.show_bus(module, index, on),
+            }
+        }
+        self.ui.end_row();
+    }
+
+    /// The loudness target: a list of presets with what each is for, and the value of a
+    /// custom target.
+    fn target(&mut self, loudness: &mut LoudnessSettings) {
+        self.caption("Target");
+        let label = |target: LoudnessTarget| match target.lufs() {
+            Some(lufs) => format!("{lufs:.0} LUFS · {}", target.description()),
+            None => String::from("Custom"),
+        };
+        ComboBox::from_id_salt("menu-loudness-target")
+            .selected_text(label(loudness.target))
+            .width(SLIDER_WIDTH + 90.0)
+            .show_ui(self.ui, |ui| {
+                for target in LoudnessTarget::ALL {
+                    ui.selectable_value(&mut loudness.target, *target, label(*target));
+                }
+            });
+        self.ui.end_row();
+        if loudness.target == LoudnessTarget::Custom {
+            self.number(
+                "Custom target",
+                &mut loudness.custom_lufs,
+                LoudnessSettings::CUSTOM_LUFS,
+                |lufs| format!("{lufs:.0} LUFS"),
+            );
+        }
+    }
+
     /// A push button after an empty caption; `true` when clicked.
     fn action(&mut self, label: &str) -> bool {
         self.caption("");
@@ -444,9 +522,10 @@ fn sonogram_rows(grid: &mut SettingsGrid<'_>, sonogram: &mut SonogramSettings) {
 fn settings_tab(
     grid: &mut SettingsGrid<'_>,
     module: Module,
-    settings: &mut AnalyzerSettings,
+    (settings, sources): (&mut AnalyzerSettings, &mut SourceList),
 ) -> Actions {
     let mut actions = Actions::default();
+    grid.signals(module, sources);
     match module {
         Module::Spectrum => {
             let spectrum = &mut settings.spectrum;
@@ -528,9 +607,10 @@ fn settings_tab(
         }
         Module::Loudness => {
             let loudness = &mut settings.loudness;
-            grid.choice("Target LUFS", &mut loudness.target, 44.0);
+            grid.target(loudness);
             grid.choice("Readouts", &mut loudness.scale, 44.0);
             grid.steps("History", &mut loudness.span);
+            grid.toggle("Platforms", &mut loudness.platforms);
             actions.reset_loudness = grid.action("RESET MEASUREMENT");
         }
     }
@@ -543,7 +623,7 @@ pub fn view_menu(
     context: &Context,
     menu: ViewMenu,
     tab: &mut MenuTab,
-    settings: &mut AnalyzerSettings,
+    (settings, sources): (&mut AnalyzerSettings, &mut SourceList),
     colors: &Colors,
 ) -> (bool, Actions) {
     let id = Id::new(("view-menu", menu.module));
@@ -591,7 +671,11 @@ pub fn view_menu(
                                     ui,
                                     accent: colors.accent,
                                 };
-                                actions = settings_tab(&mut grid, menu.module, settings);
+                                actions = settings_tab(
+                                    &mut grid,
+                                    menu.module,
+                                    (&mut *settings, &mut *sources),
+                                );
                             });
                     }
                     MenuTab::Colors => {

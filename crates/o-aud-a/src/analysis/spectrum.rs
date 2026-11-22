@@ -1,6 +1,7 @@
 //! FFT-based analyses: the averaged spectrum, sonogram columns and the 3D histories.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::analysis::fft::{BandBins, BandMap, FLOOR_DB, FftTap, History, power_to_db};
 use crate::analysis::stereo::{BandStereo, BandStereoMeter, correlation, pan_position};
@@ -20,6 +21,15 @@ pub const SONOGRAM_QUEUE: usize = 1_024;
 pub const PAN_COLUMNS: usize = 49;
 /// Decay time constant of the stereogram in seconds.
 const STEREOGRAM_TIME_S: f32 = 0.35;
+
+/// Sonogram generations, unique across stages, so a view switching between the input's
+/// and a source's feed always starts again. Zero is never handed out: it marks an empty
+/// feed.
+static SONOGRAM_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_sonogram_generation() -> u64 {
+    SONOGRAM_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
 
 /// The averaged spectrum, for the editor.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -312,7 +322,13 @@ impl SonogramStage {
             self.tap.bins(),
             self.sample_rate / self.tap.samples() as f32,
         );
-        self.generation += 1;
+        self.generation = next_sonogram_generation();
+    }
+
+    /// Starts again with a new generation, so the editor clears its image.
+    pub fn restart(&mut self) {
+        self.wave = [EMPTY_WAVE; 2];
+        self.generation = next_sonogram_generation();
     }
 
     pub fn configure(&mut self, settings: SonogramSettings) {
@@ -421,6 +437,12 @@ impl SurfaceStage {
         );
         self.stereo_power = vec![0.0; bands * PAN_COLUMNS];
         self.stereo_cross = vec![0.0; bands * PAN_COLUMNS];
+    }
+
+    /// Clears the stereogram, for a new history.
+    pub fn restart(&mut self) {
+        self.stereo_power.fill(0.0);
+        self.stereo_cross.fill(0.0);
     }
 
     pub fn configure(&mut self, settings: SurfaceSettings, fft: SonogramSettings) {

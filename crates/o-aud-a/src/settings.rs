@@ -382,32 +382,47 @@ choice! {
 }
 
 choice! {
-    /// Integrated loudness target in LUFS.
+    /// Integrated loudness target preset, loudest first. Persisted by variant name.
     LoudnessTarget {
+        SpotifyLoud => "−11",
         Streaming => "−14",
+        Deezer => "−15",
         Podcast => "−16",
+        Aes => "−18",
+        SpotifyQuiet => "−19",
         Ebu => "−23",
         Atsc => "−24",
+        Custom => "CUSTOM",
     } default Streaming
 }
 
 impl LoudnessTarget {
-    /// Target in LUFS.
-    pub fn lufs(self) -> f32 {
+    /// Target in LUFS; `None` for [`Self::Custom`], whose value is a setting.
+    pub fn lufs(self) -> Option<f32> {
         match self {
-            Self::Streaming => -14.0,
-            Self::Podcast => -16.0,
-            Self::Ebu => -23.0,
-            Self::Atsc => -24.0,
+            Self::SpotifyLoud => Some(-11.0),
+            Self::Streaming => Some(-14.0),
+            Self::Deezer => Some(-15.0),
+            Self::Podcast => Some(-16.0),
+            Self::Aes => Some(-18.0),
+            Self::SpotifyQuiet => Some(-19.0),
+            Self::Ebu => Some(-23.0),
+            Self::Atsc => Some(-24.0),
+            Self::Custom => None,
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Streaming => "Streaming platforms",
-            Self::Podcast => "Podcasts, Apple Music",
+            Self::SpotifyLoud => "Spotify Loud",
+            Self::Streaming => "Spotify, YouTube, Tidal, Amazon",
+            Self::Deezer => "Deezer",
+            Self::Podcast => "Apple Music, podcasts",
+            Self::Aes => "AES streaming (TD1008)",
+            Self::SpotifyQuiet => "Spotify Quiet",
             Self::Ebu => "EBU R 128 broadcast",
             Self::Atsc => "ATSC A/85 broadcast",
+            Self::Custom => "Custom",
         }
     }
 }
@@ -799,6 +814,15 @@ impl SonogramSettings {
         }
     }
 
+    /// Names of the lanes' signals; the second is empty with one lane.
+    pub fn lane_names(&self) -> [&'static str; 2] {
+        let (first, second) = self.signals();
+        [
+            Signal::LABELS[first.index()],
+            second.map_or("", |signal| Signal::LABELS[signal.index()]),
+        ]
+    }
+
     /// Number of lanes.
     pub fn lanes(&self) -> usize {
         if self.channels == Lanes::Single { 1 } else { 2 }
@@ -850,12 +874,45 @@ impl StereoSettings {
 }
 
 /// Loudness meter settings.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LoudnessSettings {
     pub target: LoudnessTarget,
     pub scale: LoudnessScale,
     pub span: HistorySpan,
+    /// The custom target in LUFS.
+    pub custom_lufs: f32,
+    /// Shows the streaming platforms' normalization in place of the history.
+    pub platforms: bool,
+}
+
+impl Default for LoudnessSettings {
+    fn default() -> Self {
+        Self {
+            target: LoudnessTarget::default(),
+            scale: LoudnessScale::default(),
+            span: HistorySpan::default(),
+            custom_lufs: -14.0,
+            platforms: false,
+        }
+    }
+}
+
+impl LoudnessSettings {
+    /// The custom target's range in LUFS.
+    pub const CUSTOM_LUFS: Range = Range {
+        min: -36.0,
+        max: -6.0,
+        default: -14.0,
+        taper: Taper::Linear,
+    };
+
+    /// The integrated loudness target in LUFS.
+    pub fn target_lufs(&self) -> f32 {
+        self.target
+            .lufs()
+            .unwrap_or_else(|| Self::CUSTOM_LUFS.clamp(self.custom_lufs).round())
+    }
 }
 
 /// 3D view settings, including the camera.
@@ -963,9 +1020,32 @@ impl AnalyzerSettings {
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalyzerSettings, Choice, FftSize, ScopeMode, ScopeSamples, ScopeZoom, SonogramSettings,
-        SpectralSettings, Speed, SurfaceBands, SurfaceDepth, TimeSpan,
+        AnalyzerSettings, Choice, FftSize, LoudnessSettings, LoudnessTarget, ScopeMode,
+        ScopeSamples, ScopeZoom, SonogramSettings, SpectralSettings, Speed, SurfaceBands,
+        SurfaceDepth, TimeSpan,
     };
+
+    #[test]
+    fn loudness_targets_load_by_name_and_custom_targets_clamp() {
+        let stored: LoudnessSettings =
+            serde_json::from_str(r#"{"target":"Ebu"}"#).expect("valid JSON");
+        assert_eq!(stored.target_lufs(), -23.0);
+        assert!(!stored.platforms);
+        let mut custom = LoudnessSettings {
+            target: LoudnessTarget::Custom,
+            custom_lufs: -9.6,
+            ..LoudnessSettings::default()
+        };
+        assert_eq!(custom.target_lufs(), -10.0, "whole LUFS");
+        custom.custom_lufs = -80.0;
+        assert_eq!(custom.target_lufs(), -36.0);
+        assert!(
+            LoudnessTarget::ALL
+                .windows(2)
+                .all(|pair| pair[0].lufs().unwrap_or(f32::MIN) > pair[1].lufs().unwrap_or(f32::MIN)),
+            "presets run from loud to quiet, CUSTOM last"
+        );
+    }
 
     #[test]
     fn sessions_of_earlier_versions_keep_their_ranges_and_scope_lines() {
