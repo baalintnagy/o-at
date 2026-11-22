@@ -5,7 +5,7 @@ Run these commands from the repository root:
 ```bash
 cargo fmt --all
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone,o-aud-a/standalone -- -D warnings
+cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone -- -D warnings
 cargo test --release
 cargo test --test realtime
 cargo test --workspace --release
@@ -43,5 +43,5 @@ These conventions are not enforced by the configured tools:
 - No glob imports, including in test modules.
 - Iterator adapters versus loops, following the guidance in [AGENTS.md](../AGENTS.md).
 - Real-time safety of code reachable from `Plugin::process`, `TxPort::process`,
-  `Receiver::process` and `Capture::push` beyond allocations, which debug builds detect at run time.
+  `InterleavedSender::send`, `Receiver::process` and `Capture::push` beyond allocations, which debug builds detect at run time.
 - Units in names or doc comments.

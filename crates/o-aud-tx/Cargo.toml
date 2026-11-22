@@ -5,27 +5,25 @@ edition = "2024"
 rust-version = "1.85"
 authors = ["baalintnagy"]
 license = "MIT"
-description = "O-AUD-TX: sends a track's audio to a named audio bus"
+description = "O-AUD-TX: sends audio to a named audio bus, as a plugin and as the core of the standalone transmitter"
 publish = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
-[[bin]]
-name = "o-aud-tx-standalone"
-path = "src/main.rs"
-required-features = ["standalone"]
-
 [features]
-# Standalone application for sending an audio input to a bus without a host.
-standalone = ["nih_plug/standalone"]
+default = ["plugin"]
+# The shared egui editor body.
+view = ["dep:egui", "dep:aud-ui"]
+# The VST3 and CLAP plugin.
+plugin = ["view", "dep:nih_plug", "dep:nih_plug_egui", "aud-ui/nih-plug"]
 
 [dependencies]
 audbus = { path = "../audbus" }
-aud-ui = { path = "../aud-ui", features = ["nih-plug"] }
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"] }
-egui = { version = "0.31", default-features = false }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101" }
+aud-ui = { path = "../aud-ui", optional = true }
+egui = { version = "0.31", default-features = false, optional = true }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"], optional = true }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", optional = true }
 
 [build-dependencies]
 # Embeds the icon and version information in Windows executables.

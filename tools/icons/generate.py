@@ -145,6 +145,23 @@ def analyzer() -> Image.Image:
     return Image.alpha_composite(icon, layer)
 
 
+def suite() -> Image.Image:
+    """O-AT: four rounded tiles in the tools' colors (O-AUD-TX, O-AUD-RX, O-NEC,
+    O-AUD-A), for folders and shortcuts that hold the whole suite."""
+    icon = background()
+    layer = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    size = CANVAS * 0.27
+    gap = CANVAS * 0.06
+    start = (CANVAS - 2 * size - gap) / 2
+    colors = [SEND, RECEIVE, REMOVED, ANALYZE]
+    for index, color in enumerate(colors):
+        x = start + (index % 2) * (size + gap)
+        y = start + (index // 2) * (size + gap)
+        draw.rounded_rectangle([x, y, x + size, y + size], CANVAS * 0.06, fill=color + (255,))
+    return Image.alpha_composite(icon, layer)
+
+
 def save(name: str, image: Image.Image) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     image.resize((256, 256), Image.LANCZOS).save(OUT / f"{name}.png")
@@ -162,6 +179,7 @@ def main() -> None:
     save("o-aud-rx", signal(RECEIVE, facing_right=False))
     save("o-nec", cleanup())
     save("o-aud-a", analyzer())
+    save("o-at", suite())
 
 
 if __name__ == "__main__":

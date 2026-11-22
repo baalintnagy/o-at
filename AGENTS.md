@@ -50,9 +50,9 @@ buffer and parameters. Keep `Telemetry` fixed-size.
 
 # Audio bus tools
 
-O-AUD-TX, O-AUD-RX and the O-AUD-RX application live in `crates/`; see
+O-AUD-TX, O-AUD-RX and their applications live in `crates/`; see
 [docs/audio-bus.md](docs/audio-bus.md). The same real-time rules apply to
-`TxPort::process`, `Receiver::process` and the `BusWriter` and `BusReader` methods they
+`TxPort::process`, `InterleavedSender::send`, `Receiver::process` and the `BusWriter` and `BusReader` methods they
 call. Their link threads open shared memory, lease names and allocate; resources reach
 the audio thread only through `audbus::handoff`, which also returns them for dropping.
 Run `cargo test -p audbus -p o-aud-tx -p o-aud-rx` (a debug build, with allocation checks)
@@ -63,9 +63,11 @@ binaries. Never change them without raising `PROTOCOL_VERSION`.
 
 All editors, O-NEC's and O-AUD-A's included, take their palette and controls from
 `aud-ui`; O-NEC keeps only its signal colors in `src/editor/colors.rs`. Controls use the `Control` and
-`Switch` abstractions, bound to parameters with `aud_ui::param`, so the O-AUD-RX editor
-body serves the plugin and the application. Keep plugin-specific code out of
-`o-aud-rx`'s core modules; the `plugin` and `view` features gate NIH-plug and egui.
+`Switch` abstractions, bound to parameters with `aud_ui::param`, so the O-AUD-TX and
+O-AUD-RX editor bodies serve the plugins and the applications. Keep plugin-specific code
+out of `o-aud-tx`'s and `o-aud-rx`'s core modules; the `plugin` and `view` features gate
+NIH-plug and egui. A port replaced with `TxLink::replace_port` reclaims the bus, so drop
+the previous port (its device stream) first.
 
 # Audio analyzer
 

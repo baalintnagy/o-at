@@ -5,11 +5,19 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(all(debug_assertions, not(feature = "plugin")))]
+use assert_no_alloc::AllocDisabler;
 use assert_no_alloc::assert_no_alloc;
 use audbus::{BusName, BusReader, Directory};
+use o_aud_tx::interleaved::{InterleavedSender, MAX_BLOCK_FRAMES};
 use o_aud_tx::link::{TxLink, TxState, transmitter_in};
 use o_aud_tx::port::TxPort;
 use o_aud_tx::telemetry::TxTelemetry;
+
+// With the `plugin` feature, NIH-plug's `assert_process_allocs` installs this allocator.
+#[cfg(all(debug_assertions, not(feature = "plugin")))]
+#[global_allocator]
+static ALLOCATOR: AllocDisabler = AllocDisabler;
 
 fn namespace(test: &str) -> String {
     format!("o-aud-tx-test-{test}-{}", process::id())
@@ -133,4 +141,82 @@ fn sending_does_not_allocate() {
     }
     assert_eq!(link.status().state, TxState::Live);
     assert_eq!(link.name(), "Alloc 2");
+}
+
+/// Waits until the link is live, sending silence through `sender`.
+fn wait_live(link: &TxLink, sender: &mut InterleavedSender) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let block = [0_i16; 128];
+    while link.status().state != TxState::Live {
+        sender.send(&block, 1.0, f32::from);
+        assert!(
+            Instant::now() < deadline,
+            "state stuck at {:?}",
+            link.status().state
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    // Let the port take over the writer.
+    sender.send(&block, 1.0, f32::from);
+}
+
+#[test]
+fn interleaved_buffers_reach_the_bus_planar() {
+    let namespace = namespace("interleaved");
+    let (link, port, _) = start(&namespace, "Interleaved");
+    // A four-channel device: all four channels reach the bus.
+    let mut sender = InterleavedSender::new(port, 48_000, 4);
+    link.set_format(48_000, sender.channels());
+    wait_live(&link, &mut sender);
+    let directory = Directory::open_namespace(&namespace).expect("directory opens");
+    let reader = BusReader::open(&directory, &BusName::new("Interleaved").expect("valid"))
+        .expect("bus exists");
+
+    // Longer than one block, so the buffer is split.
+    let frames = MAX_BLOCK_FRAMES + 100;
+    let data: Vec<f32> = (0..frames).flat_map(|_| [0.1_f32, 0.2, 0.3, 0.4]).collect();
+    // Settle the gain ramp at unity first.
+    sender.send(&data, 1.0, |sample| sample);
+    let position = reader.write_position();
+    sender.send(&data, 1.0, |sample| sample);
+    let format = reader.format().expect("stream started");
+    assert_eq!((format.sample_rate, format.channels), (48_000, 4));
+    let mut output = vec![0.0; 4 * frames];
+    assert!(reader.read(position, frames, 4, format.epoch, &mut output));
+    for (channel, expected) in output.chunks(frames).zip([0.1, 0.2, 0.3, 0.4]) {
+        assert!(
+            channel
+                .iter()
+                .all(|&sample| (sample - expected).abs() < 1e-6)
+        );
+    }
+}
+
+#[test]
+fn replaced_ports_reclaim_the_bus_without_allocating() {
+    let namespace = namespace("replace");
+    let (link, port, _) = start(&namespace, "Replace");
+    let mut sender = InterleavedSender::new(port, 48_000, 2);
+    wait_live(&link, &mut sender);
+
+    // A new device stream: drop the old port, then send through a replacement.
+    drop(sender);
+    let mut sender = InterleavedSender::new(link.replace_port(), 44_100, 1);
+    link.set_format(44_100, sender.channels());
+    let block = vec![1_000_i16; 2 * 441];
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        assert_no_alloc(|| {
+            for _ in 0..16 {
+                sender.send(&block, 0.5, |sample| f32::from(sample) / 32_768.0);
+            }
+        });
+        thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(link.status().state, TxState::Live);
+    let directory = Directory::open_namespace(&namespace).expect("directory opens");
+    let reader =
+        BusReader::open(&directory, &BusName::new("Replace").expect("valid")).expect("bus exists");
+    let format = reader.format().expect("stream started");
+    assert_eq!((format.sample_rate, format.channels), (44_100, 1));
 }

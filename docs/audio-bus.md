@@ -1,23 +1,40 @@
 # O-AUD-TX, O-AUD-RX and the audio bus
 
-O-AUD-TX sends a track's audio to a named bus. O-AUD-RX plays a bus: as a plugin in any host,
-or as the standalone O-AUD-RX application on any output device. Buses need no server or
-driver; they live in shared memory.
+O-AUD-TX sends audio to a named bus: as a plugin, a track's audio; as the standalone
+O-AUD-TX application, an input device or everything an output device plays. O-AUD-RX
+plays a bus: as a plugin in any host, or as the standalone O-AUD-RX application on any
+output device. Buses need no server or driver; they live in shared memory.
 
 ## Crates
 
 | Crate | Role |
 | --- | --- |
 | `audbus` | Transport: bus directory, name leases, the shared ring, real-time handoff. |
-| `aud-ui` | Editor theme and controls shared by O-NEC, both plugins and the application. |
-| `o-aud-tx` | The O-AUD-TX plugin: link thread, audio port and editor. |
+| `aud-ui` | Editor theme and controls shared by O-NEC, both plugins and the applications. |
+| `o-aud-tx` | The transmitter core (link, port, interleaved sender), the editor body and, with the default `plugin` feature, the O-AUD-TX plugin. |
 | `o-aud-rx` | The receiver core (link, connection, engine, clock sync), the editor body and, with the default `plugin` feature, the O-AUD-RX plugin. |
 | `o-aud-rx-app` | The standalone O-AUD-RX application: the `o-aud-rx` core and editor body with cpal output. |
+| `o-aud-tx-app` | The standalone O-AUD-TX application: the `o-aud-tx` core and editor body with cpal input and loopback capture. |
 
 Editors depend on the `Control` and `Switch` abstractions in `aud-ui`, not on NIH-plug
-parameters, so the plugin and the application share the O-AUD-RX editor body. The plugin
-binds them to parameters with automation gestures; the application binds them to
-atomic settings.
+parameters, so each plugin and its application share an editor body. The plugins bind
+them to parameters with automation gestures; the applications bind them to atomic
+settings. The O-AUD-TX application has no track, so its editor has no THRU switch.
+
+## Capture in the O-AUD-TX application
+
+A controller thread owns the cpal streams and rebuilds them when the source changes or
+a device fails. Each capture stream gets a fresh port from `TxLink::replace_port`, after
+the previous stream is dropped; the link then claims the bus again for the new port, so
+receivers resynchronize to the new format instead of losing the bus. The callback
+deinterleaves through `InterleavedSender`, which splits long device buffers into blocks
+of at most 8 192 frames and sends the first 8 device channels.
+
+An output device is captured with WASAPI loopback: cpal opens an input stream on a render
+endpoint with `AUDCLNT_STREAMFLAGS_LOOPBACK`. Loopback delivers no packets while the
+device plays nothing, which would stall the bus, so the application keeps a silent output
+stream open on the captured device. Loopback captures the device's whole mix; per-process
+loopback is not used.
 
 ## Threads
 
@@ -103,7 +120,9 @@ The tests cover leases and name conflicts, separately mapped directories, ring r
 trips, overwritten-data detection, format changes, listener counting, automatic names
 and free variants, clock locking to a +300 ppm 44.1 kHz source at 48 kHz (queue, drift
 estimate, pitch and level), recovery after a stalled transmitter, automatic latency for
-bursty transmitters, and allocation-free audio paths of the bus, O-AUD-TX and O-AUD-RX.
+bursty transmitters, interleaved device buffers, port replacement on a device change,
+and allocation-free audio paths of the bus, O-AUD-TX (including the interleaved sender
+the application uses) and O-AUD-RX.
 Run them in debug builds for the allocation checks.
 
 To test against a real device clock without a host, send a tone clocked by any output

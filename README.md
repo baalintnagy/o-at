@@ -144,7 +144,7 @@ On Linux, building the editor needs X11, XCB and OpenGL development packages.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone,o-aud-a/standalone -- -D warnings
+cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone -- -D warnings
 cargo test --release
 cargo test --test realtime
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
@@ -173,7 +173,7 @@ See [DSP design](docs/dsp.md) and [source style](docs/source-style.md).
 
 ## O-AUD-TX and O-AUD-RX
 
-Two companion plugins and an application route audio between hosts and devices
+Two companion plugins and two applications route audio between hosts and devices
 through named buses, for example from a DAW to a voice chat application's device or to
 headphones on another interface.
 
@@ -182,6 +182,9 @@ headphones on another interface.
 - **O-AUD-RX** (VST3, CLAP) plays a bus inside any host, mixed with the track's input.
 - The standalone **O-AUD-RX** application plays a bus on any output device. It uses the
   same receiver core and editor as the plugin.
+- The standalone **O-AUD-TX** application sends an input device to a bus, or captures
+  everything an output device plays (Windows loopback) and sends that. It uses the same
+  transmitter core and editor as the plugin.
 
 | O-AUD-TX | O-AUD-RX application |
 | --- | --- |
@@ -206,9 +209,18 @@ Using them:
    its target automatically when the transmitter's or the device's blocks need more,
    and lowers it again slowly once they are steady.
 
-The application remembers its bus, device and settings, and accepts
+The O-AUD-RX application remembers its bus, device and settings, and accepts
 `--bus NAME` and `--device NAME`. On Windows the settings are stored in
 `%APPDATA%\O-AUD-RX\settings.ini`.
+
+The O-AUD-TX application lists input devices and output devices in its **AUDIO SOURCE**
+panel. An output device sends whatever Windows mixes to it, from any application. To
+send a single application, route it to a device you don't listen to (Windows' per-app
+sound settings, or a virtual cable) and pick that device. While capturing an output, the
+application keeps a silent stream open on it, so the bus keeps running through silence.
+Don't play the bus on the device it captures: that feeds back. It remembers its bus,
+source and settings in `%APPDATA%\O-AUD-TX\settings.ini`, and accepts `--bus NAME`,
+`--input NAME` and `--loopback NAME` (`default` selects the system default device).
 
 Build them with:
 
@@ -224,12 +236,16 @@ cargo xtask bundle o-aud-rx --release
 cargo build --release -p o-aud-rx-app
 ```
 
-The bundles are written to `target/bundled/`, the application to
-`target/release/o-aud-rx.exe`. O-AUD-TX also builds as a standalone application that sends
-an audio input to a bus (`cargo run --release -p o-aud-tx --features standalone --bin
-o-aud-tx-standalone`).
+```bash
+cargo build --release -p o-aud-tx-app
+```
 
-Limitations: buses carry up to 8 channels (the plugins use mono and stereo layouts);
+The bundles are written to `target/bundled/`, the applications to
+`target/release/o-aud-rx.exe` and `target/release/o-aud-tx.exe`.
+
+Limitations: buses carry up to 8 channels (the plugins use mono and stereo layouts, the
+O-AUD-TX application sends up to 8 device channels); loopback captures a whole output
+device, not a single application;
 transmitter and receivers must run on the same computer and, on Windows, in the same
 user session; a transmitter whose clock is more than 0.5 % off cannot be followed
 without dropouts. See [Audio bus design](docs/audio-bus.md).

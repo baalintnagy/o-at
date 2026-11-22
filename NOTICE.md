@@ -10,7 +10,7 @@ under the [MIT License](LICENSE). Third-party materials retain their own license
 The VST3 export of NIH-plug uses the `vst3-sys` bindings, which are licensed under
 the GNU General Public License version 3. Distributed `O-NEC.vst3`, `O-AUD-TX.vst3`,
 `O-AUD-RX.vst3` and `O-AUD-A.vst3` binaries, and the NIH-plug standalone builds, are
-therefore combined works under GPLv3 terms. The CLAP binaries and the O-AUD-RX application do not include
+therefore combined works under GPLv3 terms. The CLAP binaries and the O-AUD-RX and O-AUD-TX applications do not include
 those bindings. This does not change the MIT license of the repository's own source
 code.
 
@@ -27,7 +27,7 @@ code.
 | egui-baseview, realfft | MIT |
 | assert_no_alloc (debug allocation checks) | BSD-1-Clause |
 | triple_buffer | MPL-2.0 |
-| cpal (O-AUD-RX application, standalone builds), windows-sys, memmap2 (Unix) | Apache-2.0, or MIT or Apache-2.0 |
+| cpal (O-AUD-RX and O-AUD-TX applications, standalone builds), windows-sys, memmap2 (Unix) | Apache-2.0, or MIT or Apache-2.0 |
 | winresource (build tool embedding icons and version information) | MIT |
 
 Some transitive dependencies offer additional permissive options (Unlicense, Zlib,

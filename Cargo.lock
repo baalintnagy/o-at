@@ -2190,6 +2190,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "o-aud-tx-app"
+version = "0.4.5"
+dependencies = [
+ "aud-ui",
+ "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
+ "cpal",
+ "egui",
+ "egui-baseview",
+ "o-aud-tx",
+ "windows-sys 0.59.0",
+ "winresource",
+]
+
+[[package]]
 name = "o-nec"
 version = "0.4.5"
 dependencies = [

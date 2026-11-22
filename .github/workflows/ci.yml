@@ -19,7 +19,7 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Lint
-        run: cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-tx/standalone,o-aud-a/standalone -- -D warnings
+        run: cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone -- -D warnings
       - name: Test
         run: cargo test --workspace --release
       - name: Real-time allocation check (debug build)
@@ -37,11 +37,11 @@ jobs:
       - name: Build applications
         run: |
           cargo build --release -p o-aud-rx-app
-          cargo build --release -p o-aud-tx --features standalone --bin o-aud-tx-standalone
+          cargo build --release -p o-aud-tx-app
           cargo build --release -p o-aud-a --features standalone --bin o-aud-a-standalone
           cargo build --release --features standalone --bin o-nec-standalone
           Copy-Item target/release/o-aud-rx.exe target/bundled/O-AUD-RX.exe
-          Copy-Item target/release/o-aud-tx-standalone.exe target/bundled/O-AUD-TX-standalone.exe
+          Copy-Item target/release/o-aud-tx.exe target/bundled/O-AUD-TX.exe
           Copy-Item target/release/o-aud-a-standalone.exe target/bundled/O-AUD-A-standalone.exe
           Copy-Item target/release/o-nec-standalone.exe target/bundled/O-NEC-standalone.exe
       - uses: actions/upload-artifact@v4

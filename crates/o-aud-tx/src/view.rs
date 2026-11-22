@@ -1,4 +1,4 @@
-//! The O-AUD-TX editor.
+//! The O-AUD-TX editor body, shared by the plugin and the standalone application.
 
 use aud_ui::control::{Control, Switch};
 use aud_ui::name_window::{NameWindow, name_editor};
@@ -26,11 +26,12 @@ const ROW_HEIGHT: f32 = 26.0;
 /// History length in editor frames (about six seconds at 60 frames per second).
 const HISTORY_LEN: usize = 360;
 
-/// The transmitter's parameters as editor controls.
+/// The transmitter's controls, bound to plugin parameters or application settings.
 pub struct TxControls<'a> {
     pub gain: &'a dyn Control,
     pub send: &'a dyn Switch,
-    pub thru: &'a dyn Switch,
+    /// Keeps the track's own output; `None` where there is no track (the application).
+    pub thru: Option<&'a dyn Switch>,
 }
 
 /// Editor state kept between frames.
@@ -147,10 +148,7 @@ fn draw_bus(ui: &mut Ui, rect: Rect, state: &mut TxViewState, link: &TxLink, sta
     }
 
     let (message, color) = match &status.state {
-        TxState::Inactive => (
-            String::from("Starts when the host activates the plugin"),
-            TEXT_DIM,
-        ),
+        TxState::Inactive => (String::from("Starts when the audio starts"), TEXT_DIM),
         TxState::InvalidName(error) => (error.to_string(), ALERT),
         TxState::Taken { .. } => (String::from("Another O-AUD-TX uses this name"), ALERT),
         TxState::Live => (String::from("Receivers can select this bus"), SEND),
@@ -238,20 +236,22 @@ fn draw_send(ui: &mut Ui, rect: Rect, state: &TxViewState, controls: &TxControls
         pos2(knob_rect.right() + 18.0, rect.top() + 44.0),
         vec2(rect.right() - knob_rect.right() - 32.0, 22.0),
     );
-    toggle_button(ui, controls.thru, thru, "THRU TO TRACK", SEND)
-        .on_hover_text("Keep the track's own output; switch off to only send");
-    let hint = if controls.thru.is_on() {
-        "Track output unchanged"
-    } else {
-        "Track output muted, send only"
-    };
-    ui.painter().text(
-        pos2(thru.left(), thru.bottom() + 14.0),
-        Align2::LEFT_CENTER,
-        hint,
-        font(10.0),
-        TEXT_DIM,
-    );
+    if let Some(thru_switch) = controls.thru {
+        toggle_button(ui, thru_switch, thru, "THRU TO TRACK", SEND)
+            .on_hover_text("Keep the track's own output; switch off to only send");
+        let hint = if thru_switch.is_on() {
+            "Track output unchanged"
+        } else {
+            "Track output muted, send only"
+        };
+        ui.painter().text(
+            pos2(thru.left(), thru.bottom() + 14.0),
+            Align2::LEFT_CENTER,
+            hint,
+            font(10.0),
+            TEXT_DIM,
+        );
+    }
     let send_hint = if controls.send.is_on() {
         "Sending to the bus"
     } else {

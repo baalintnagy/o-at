@@ -6,7 +6,7 @@ Contents
 VST3\O-NEC.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3, O-AUD-A.vst3    VST3 plugins
 CLAP\O-NEC.clap, O-AUD-TX.clap, O-AUD-RX.clap, O-AUD-A.clap    CLAP plugins
 O-AUD-RX.exe                    Plays a bus on any output device
-O-AUD-TX-standalone.exe         Sends an audio input device to a bus
+O-AUD-TX.exe                    Sends an input, or what an output plays, to a bus
 O-AUD-A-standalone.exe          Analyzes an audio input device
 O-NEC-standalone.exe            O-NEC without a plugin host
 
@@ -38,9 +38,13 @@ the same permission level.
 O-AUD-RX.exe remembers its bus, device and settings in %APPDATA%\O-AUD-RX\settings.ini
 and accepts --bus NAME and --device NAME.
 
-O-AUD-TX-standalone.exe: run it with --backend wasapi (see --help for devices and rates).
-It plays its input to its output while sending; use headphones or switch THRU TO TRACK
-off to avoid feedback.
+O-AUD-TX.exe sends an input device, or everything an output device plays, to a bus:
+pick the source under AUDIO SOURCE. To send a single application, set its output to a
+device you don't listen to (Windows Settings > Sound > Volume mixer) and pick that
+device. Don't play the bus on the device it captures, which feeds back. It remembers
+its bus, source and settings in %APPDATA%\O-AUD-TX\settings.ini and accepts --bus NAME,
+--input NAME and --loopback NAME ("default" selects the system default device).
+O-AUD-TX.exe replaces O-AUD-TX-standalone.exe; delete the earlier file.
 
 Analyze audio
 -------------

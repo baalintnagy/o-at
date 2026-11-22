@@ -53,6 +53,9 @@ pub struct TxStatus {
 struct Shared {
     namespace: String,
     name: Arc<RwLock<String>>,
+    telemetry: Arc<TxTelemetry>,
+    /// Writer handoff of a port that replaces the current one.
+    replacement: Mutex<Option<HandoffSender<BusWriter>>>,
     sample_rate: AtomicU32,
     channels: AtomicU32,
     stop: AtomicBool,
@@ -82,6 +85,8 @@ pub fn transmitter_in(
     let shared = Arc::new(Shared {
         namespace: namespace.to_owned(),
         name,
+        telemetry: Arc::clone(&telemetry),
+        replacement: Mutex::new(None),
         sample_rate: AtomicU32::new(0),
         channels: AtomicU32::new(0),
         stop: AtomicBool::new(false),
@@ -110,6 +115,20 @@ impl TxLink {
             .channels
             .store(channels as u32, Ordering::Relaxed);
         self.wake();
+    }
+
+    /// Creates a port that replaces the previous one, for example when an application
+    /// opens another audio device. Drop the previous port first: the bus is reclaimed
+    /// for the new port, and both must never write at once.
+    pub fn replace_port(&self) -> TxPort {
+        let (sender, writers) = handoff();
+        *self
+            .shared
+            .replacement
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(sender);
+        self.wake();
+        TxPort::new(writers, Arc::clone(&self.shared.telemetry))
     }
 
     /// The bus name as entered.
@@ -209,6 +228,19 @@ impl Worker {
     }
 
     fn step(&mut self) -> TxState {
+        let replacement = self
+            .shared
+            .replacement
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(sender) = replacement {
+            // The previous port, and the writer it held, are gone: free the lease so the
+            // name is claimed again below with a writer for the new port.
+            self.sender = sender;
+            self.owned = None;
+            self.retiring = None;
+        }
         self.sender.collect();
         self.finish_retiring();
         let directory = match &self.directory {
