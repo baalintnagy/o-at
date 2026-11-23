@@ -7,8 +7,8 @@
 use aud_ui::theme::{TEXT, TEXT_DIM, TEXT_FAINT, alpha, font, mono, stroke};
 use aud_ui::widgets::panel;
 use egui::{
-    Align2, Color32, ColorImage, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, TextureHandle,
-    TextureOptions, Ui, pos2,
+    Align2, Color32, ColorImage, Context, Id, Mesh, Painter, Pos2, Rect, Sense, Shape,
+    TextureHandle, TextureOptions, Ui, pos2,
 };
 
 use crate::analysis::fft::FLOOR_DB;
@@ -43,6 +43,9 @@ struct Image {
     overlay: bool,
     /// One texture with the lanes one above the other.
     texture: Option<TextureHandle>,
+    /// The context that owns `texture`. The view outlives the editor window, and a
+    /// reopened window has a new context that does not know the old texture.
+    context: Option<Context>,
     /// Columns written into the levels when this image was last uploaded.
     uploaded: u64,
     /// The whole image must be uploaded again.
@@ -153,6 +156,10 @@ impl SonogramView {
         };
         {
             let image = &mut self.image;
+            if image.context.as_ref() != Some(ui.ctx()) {
+                image.context = Some(ui.ctx().clone());
+                image.texture = None;
+            }
             if heat != image.palette.heat() {
                 image.palette = Palette::new(heat);
                 image.stale = true;

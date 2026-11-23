@@ -25,6 +25,7 @@ RECEIVE = (0x3C, 0xD6, 0xC0)
 REMOVED = (0xFF, 0x5C, 0x7A)
 ANALYZE = (0xC6, 0xE0, 0x5A)
 SYNC = (0x5C, 0xA8, 0xFF)
+BUS = (0xA4, 0x8B, 0xFA)
 
 
 def background() -> Image.Image:
@@ -145,6 +146,36 @@ def analyzer() -> Image.Image:
     return Image.alpha_composite(icon, layer)
 
 
+def denoiser() -> Image.Image:
+    """O-NR: a jagged noise floor under a flat profile line, with a clean peak rising
+    above it."""
+    icon = background()
+    layer = Image.new("RGBA", icon.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    left, right = CANVAS * 0.16, CANVAS * 0.84
+    floor = CANVAS * 0.7
+    width = CANVAS * 0.06
+
+    def x_of(t: float) -> float:
+        return left + (right - left) * t
+
+    jitter = [0.0, -0.05, 0.03, -0.07, 0.02, -0.04, 0.05, -0.06, 0.01, -0.05, 0.04, -0.03, 0.0]
+    noise = [
+        (x_of(index / (len(jitter) - 1)), floor + jitter[index] * CANVAS)
+        for index in range(len(jitter))
+    ]
+    stroke(draw, noise, width * 0.45, REMOVED)
+    profile = CANVAS * 0.58
+    stroke(draw, [(x_of(0.0), profile), (x_of(1.0), profile)], width * 0.35, BUS)
+
+    def peak(t: float) -> float:
+        return profile - CANVAS * 0.38 * math.exp(-((t - 0.5) / 0.13) ** 2)
+
+    clean = [(x_of(t), peak(t)) for t in (0.18 + 0.64 * step / 120 for step in range(121))]
+    stroke(draw, clean, width, RECEIVE)
+    return Image.alpha_composite(icon, layer)
+
+
 def suite() -> Image.Image:
     """O-AT: four rounded tiles in the tools' colors (O-AUD-TX, O-AUD-RX, O-NEC,
     O-AUD-A), for folders and shortcuts that hold the whole suite."""
@@ -179,6 +210,7 @@ def main() -> None:
     save("o-aud-rx", signal(RECEIVE, facing_right=False))
     save("o-nec", cleanup())
     save("o-aud-a", analyzer())
+    save("o-nr", denoiser())
     save("o-at", suite())
 
 

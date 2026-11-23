@@ -53,6 +53,29 @@ impl Default for TxViewState {
     }
 }
 
+impl TxViewState {
+    /// Feeds the peaks since the previous frame, `elapsed_s` seconds later, to the meters
+    /// and the level history. [`draw`] does this; call it for a state that is not drawn,
+    /// so its meters keep up.
+    pub fn update_meters(&mut self, telemetry: &TxTelemetry, elapsed_s: f32) {
+        let mut loudest = 0.0_f32;
+        for (meter, peak) in self.meters.iter_mut().zip(&telemetry.peaks) {
+            let peak = peak.take();
+            loudest = loudest.max(peak);
+            meter.update(peak, elapsed_s);
+        }
+        self.level.push(gain_to_db(loudest));
+    }
+
+    /// The loudest channel's meter level in dBFS.
+    pub fn level_db(&self) -> f32 {
+        self.meters
+            .iter()
+            .map(MeterState::level_db)
+            .fold(METER_FLOOR_DB, f32::max)
+    }
+}
+
 /// Draws the editor into `rect`.
 pub fn draw(
     ui: &mut Ui,
@@ -63,13 +86,7 @@ pub fn draw(
     telemetry: &TxTelemetry,
 ) {
     let elapsed_s = ui.input(|input| input.stable_dt).min(0.1);
-    let mut loudest = 0.0_f32;
-    for (meter, peak) in state.meters.iter_mut().zip(&telemetry.peaks) {
-        let peak = peak.take();
-        loudest = loudest.max(peak);
-        meter.update(peak, elapsed_s);
-    }
-    state.level.push(gain_to_db(loudest));
+    state.update_meters(telemetry, elapsed_s);
     let status = link.status();
 
     let inner = rect.shrink2(vec2(MARGIN, 0.0));
