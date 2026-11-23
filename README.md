@@ -222,6 +222,8 @@ Don't play the bus on the device it captures: that feeds back. It remembers its 
 source and settings in `%APPDATA%\O-AUD-TX\settings.ini`, and accepts `--bus NAME`,
 `--input NAME` and `--loopback NAME` (`default` selects the system default device).
 
+![O-AUD-TX application sending an input device, with its AUDIO SOURCE panel](docs/o-aud-tx-app.png)
+
 Build them with:
 
 ```bash
@@ -289,7 +291,8 @@ analysis fell behind. Its pages, in this order, show:
 | **3D**: the spectrum history as a shaded surface with the 3D grid on; the footer shows the camera's yaw, pitch and zoom. | **Settings**: the spectrum's SETTINGS tab, with segmented selectors and sliders. |
 
 The screenshots show a synthetic test piece: chords, bass, drums and a melody, panned
-across the stereo field.
+across the stereo field. The comparisons below add a louder, brighter and wider copy of
+it as the bus **Reference**.
 
 ### Sources: comparing tracks and references
 
@@ -297,6 +300,8 @@ across the stereo field.
 to the input, up to eight, each with a color of its own. The panel lists every source's
 format and momentary, short-term and integrated loudness. Pick a live bus from the list
 or type a name, which waits for its transmitter.
+
+![SOURCES panel with the input and a Reference bus, over the spectrum with match level and masking](docs/o-aud-a/sources.png)
 
 Every view chooses its signals under **SIGNALS** at the top of its settings: INPUT and
 each listed bus, as toggles in their colors. One signal is drawn as usual, with all of
@@ -314,6 +319,8 @@ the view's settings; several are overlaid, each in its color and named in the he
 Every view shows every listed bus until you hide it there; a source's dot in the panel
 shows or hides it on the spectrum. Sessions from before per-view signals keep the
 spectrum curves they had hidden. Removing a bus removes it from every view.
+
+![Overview with the input and the Reference bus overlaid in every view](docs/o-aud-a/compare.png)
 
 - **Match level** shifts each further spectrum curve by its loudness difference to the
   first (integrated loudness, short-term until that is measured), for comparisons at
@@ -342,6 +349,8 @@ gain the platform applies, the loudness and true peak after it and what happens:
   (Spotify, Apple Music), so a quiet, peaky track stays quieter.
 - **limited**: Spotify Loud turns up all the way and limits the peaks.
 - A red true peak is above the ceiling after the gain, where lossy encoding may clip.
+
+![PLATFORMS table for the input and the louder Reference bus](docs/o-aud-a/platforms.png)
 
 It works from the integrated loudness and the true peak maximum, so play the whole
 track (or the loudest part, for a quick check). With several signals, each has a column
