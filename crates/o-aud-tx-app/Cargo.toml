@@ -1,11 +1,11 @@
 [package]
 name = "o-aud-tx-app"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["baalintnagy"]
 license = "MIT"
-description = "Standalone O-AUD-TX: sends an audio input, or what an output device plays, to a named audio bus"
+description = "Standalone O-AUD-TX: sends an audio input, what an output device plays, or what an application plays, to a named audio bus"
 publish = false
 
 [[bin]]
@@ -22,7 +22,14 @@ egui-baseview = { git = "https://github.com/BillyDM/egui-baseview.git", rev = "e
 cpal = "0.15"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_HiDpi"] }
+# Process loopback, which cpal does not offer, and the audio sessions of applications.
+wasapi = "0.27"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+] }
 
 [build-dependencies]
 # Embeds the icon and version information in Windows executables.

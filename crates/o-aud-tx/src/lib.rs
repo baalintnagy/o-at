@@ -12,6 +12,7 @@ pub mod link;
 pub mod plugin;
 pub mod port;
 pub mod settings;
+pub mod silence;
 pub mod telemetry;
 #[cfg(feature = "view")]
 pub mod view;

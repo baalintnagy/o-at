@@ -1,7 +1,8 @@
 # O-AUD-TX, O-AUD-RX and the audio bus
 
 O-AUD-TX sends audio to a named bus: as a plugin, a track's audio; as the standalone
-O-AUD-TX application, an input device or everything an output device plays. O-AUD-RX
+O-AUD-TX application, any number of routes, each an input device, everything an output
+device plays, or what one application plays, sent to its own bus. O-AUD-RX
 plays a bus: as a plugin in any host, or as the standalone O-AUD-RX application on any
 output device. Buses need no server or driver; they live in shared memory.
 
@@ -14,16 +15,32 @@ output device. Buses need no server or driver; they live in shared memory.
 | `o-aud-tx` | The transmitter core (link, port, interleaved sender), the editor body and, with the default `plugin` feature, the O-AUD-TX plugin. |
 | `o-aud-rx` | The receiver core (link, connection, engine, clock sync), the editor body and, with the default `plugin` feature, the O-AUD-RX plugin. |
 | `o-aud-rx-app` | The standalone O-AUD-RX application: the `o-aud-rx` core and editor body with cpal output. |
-| `o-aud-tx-app` | The standalone O-AUD-TX application: the `o-aud-tx` core and editor body with cpal input and loopback capture. |
+| `o-aud-tx-app` | The standalone O-AUD-TX application: the `o-aud-tx` core and editor body with cpal input and loopback capture, and WASAPI process loopback for single applications. |
 
 Editors depend on the `Control` and `Switch` abstractions in `aud-ui`, not on NIH-plug
 parameters, so each plugin and its application share an editor body. The plugins bind
 them to parameters with automation gestures; the applications bind them to atomic
 settings. The O-AUD-TX application has no track, so its editor has no THRU switch.
 
+## Routes in the O-AUD-TX application
+
+The application runs any number of routes in one window. A route (`route::Route`) has
+its own `TxLink`, telemetry, settings and capture controller, so routes are as
+independent as several O-AUD-TX plugins in one host: the transmitter core and `audbus`
+keep no process-wide state. The window lists the routes on the left and shows the shared
+editor body and the source panel of the selected route. Routes that are not shown keep
+their own `TxViewState`, whose `update_meters` feeds their meters, since the telemetry
+peaks are taken once per frame. A removed route drops its capture before its link, so
+its streams and ports are gone before the link frees the bus.
+
+The settings file holds `selected = N` and one `[route]` section per route; a file
+without sections, from an earlier version, is a single route. On the command line, a bus
+and a source make a route, and a second `--bus` or a second source starts the next one;
+these routes replace the saved ones in order, and routes are added as needed.
+
 ## Capture in the O-AUD-TX application
 
-A controller thread owns the cpal streams and rebuilds them when the source changes or
+Each route's controller thread owns the cpal streams and rebuilds them when the source changes or
 a device fails. Each capture stream gets a fresh port from `TxLink::replace_port`, after
 the previous stream is dropped; the link then claims the bus again for the new port, so
 receivers resynchronize to the new format instead of losing the bus. The callback
@@ -33,8 +50,27 @@ of at most 8 192 frames and sends the first 8 device channels.
 An output device is captured with WASAPI loopback: cpal opens an input stream on a render
 endpoint with `AUDCLNT_STREAMFLAGS_LOOPBACK`. Loopback delivers no packets while the
 device plays nothing, which would stall the bus, so the application keeps a silent output
-stream open on the captured device. Loopback captures the device's whole mix; per-process
-loopback is not used.
+stream open on the captured device. Loopback captures the device's whole mix.
+
+An application is captured with WASAPI process loopback (Windows 10 version 2004 and
+later), through the `wasapi` crate, since cpal does not offer it. The source list shows
+the executables that have audio sessions on any output device; a source is stored by
+executable name, so it survives restarts of the application. The controller captures the
+topmost process of that executable with its whole process tree, since browsers and
+similar applications play from child processes. It checks every 2 s that the process
+still runs and opens it again when it was restarted, and it retries an application that
+is not running.
+
+Process loopback is activated asynchronously and needs a multithreaded COM apartment,
+so it runs on its own capture thread rather than in a cpal callback; the controller
+thread stays in cpal's single-threaded apartment and only lists sessions. The thread
+captures stereo float at the default output's rate, waiting at most 10 ms per packet.
+That thread is the audio thread of this source, with the same real-time rules. A process
+loopback stream delivers nothing while the application is quiet, and no stream of this
+application can keep it running, so `o_aud_tx::silence::SilenceFill` measures the time
+since the last packet: after 30 ms without one, the thread sends silence through
+`InterleavedSender::send_silence` for that time, minus 10 ms that a late packet may
+still cover.
 
 ## Threads
 

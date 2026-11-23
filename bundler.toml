@@ -10,3 +10,6 @@ name = "O-AUD-RX"
 
 [o-aud-a]
 name = "O-AUD-A"
+
+[o-nr]
+name = "O-NR"

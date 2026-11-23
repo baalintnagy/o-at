@@ -5,6 +5,7 @@
 | Tool | Purpose |
 | --- | --- |
 | [O-NEC](#o-nec) | Voice cleanup: noise suppression, echo cancellation, voice gate and speech leveler. |
+| [O-NR](#o-nr) | Noise reduction for any material, from a learned noise profile or a tracked noise floor. |
 | [O-AUD-TX and O-AUD-RX](#o-aud-tx-and-o-aud-rx) | Route audio between hosts, applications and devices through named buses. |
 | [O-AUD-A](#o-aud-a) | Audio analyzer: spectrum, sonogram, stereo imager, oscilloscope, loudness meter and 3D views. |
 
@@ -144,11 +145,12 @@ On Linux, building the editor needs X11, XCB and OpenGL development packages.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone -- -D warnings
+cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone -- -D warnings
 cargo test --release
 cargo test --test realtime
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
 cargo test -p o-aud-a
+cargo test -p o-nr
 ```
 
 The tests cover echo canceller convergence (over 25 dB ERLE) and near-end
@@ -171,6 +173,46 @@ pluginval --strictness-level 10 --validate target/bundled/O-NEC.vst3
 
 See [DSP design](docs/dsp.md) and [source style](docs/source-style.md).
 
+## O-NR
+
+**Open Noise Reduction** (VST3, CLAP and a standalone application) removes noise from
+any material: music, field recordings, film dialogue and voice. It learns what the
+noise sounds like from a passage where only the noise is heard, then removes that noise
+wherever it lies under the signal.
+
+![O-NR editor](docs/o-nr.png)
+
+1. Play a passage of noise alone and press **LEARN**; press **STOP LEARNING** after a
+   second or more. The signal passes unchanged while O-NR learns. The profile is stored
+   with the session and works at any sample rate and resolution.
+2. Set **Reduction** to how far the noise is lowered, and **Threshold** to how much
+   above the profile still counts as noise. **LISTEN REMOVED** plays what is taken away:
+   if you hear the signal in it, lower Threshold or Reduction.
+
+Without a profile, or with **Adaptive** selected, O-NR tracks the noise floor under the
+signal by itself. That follows steady noise (hiss, hum, fans, air conditioning) without
+learning, but cannot tell noise from a sustained note held for longer than about 1.5 s.
+
+| Control | Purpose |
+| --- | --- |
+| Noise source | **Profile** uses the learned profile; **Adaptive** tracks the noise floor. |
+| Reduction | Largest attenuation, 0–60 dB. At 0 dB the output is the input, delayed. |
+| Threshold | Offset of the noise estimate, −12 to +24 dB. Higher values remove more. |
+| Release | How quickly attenuation returns after a sound ends, 10–1000 ms. Longer keeps reverb tails. |
+| Smoothing | Fills narrow gaps between kept frequencies, for a less "watery" sound. |
+| Resolution | FFT size: Low, Medium, High or Max (1024–8192 samples at 48 kHz, scaled with the rate). Higher resolution separates hum and steady tones from the signal; lower keeps attacks sharper. |
+| Stereo link | One gain for both channels, which keeps the stereo image steady. |
+
+The spectrum shows the input, the output, the removed part and the noise estimate in
+use. O-NR delays the audio by its FFT size (at 48 kHz: 21 ms at Low, 43 ms at Medium, 171 ms at
+Max) and reports it to the host, which compensates it; changing Resolution changes the
+delay. See [Noise reduction design](docs/o-nr.md).
+
+```bash
+cargo xtask bundle o-nr --release
+cargo run --release -p o-nr --features standalone --bin o-nr-standalone -- --backend wasapi --input-device "In 1-2 (Your Interface)"
+```
+
 ## O-AUD-TX and O-AUD-RX
 
 Two companion plugins and two applications route audio between hosts and devices
@@ -182,9 +224,10 @@ headphones on another interface.
 - **O-AUD-RX** (VST3, CLAP) plays a bus inside any host, mixed with the track's input.
 - The standalone **O-AUD-RX** application plays a bus on any output device. It uses the
   same receiver core and editor as the plugin.
-- The standalone **O-AUD-TX** application sends an input device to a bus, or captures
-  everything an output device plays (Windows loopback) and sends that. It uses the same
-  transmitter core and editor as the plugin.
+- The standalone **O-AUD-TX** application sends any number of routes, each to its own
+  bus: an input device, everything an output device plays (Windows loopback), or what a
+  single application plays (Windows process loopback). It uses the same transmitter core
+  and editor as the plugin.
 
 | O-AUD-TX | O-AUD-RX application |
 | --- | --- |
@@ -213,16 +256,36 @@ The O-AUD-RX application remembers its bus, device and settings, and accepts
 `--bus NAME` and `--device NAME`. On Windows the settings are stored in
 `%APPDATA%\O-AUD-RX\settings.ini`.
 
-The O-AUD-TX application lists input devices and output devices in its **AUDIO SOURCE**
-panel. An output device sends whatever Windows mixes to it, from any application. To
-send a single application, route it to a device you don't listen to (Windows' per-app
-sound settings, or a virtual cable) and pick that device. While capturing an output, the
-application keeps a silent stream open on it, so the bus keeps running through silence.
-Don't play the bus on the device it captures: that feeds back. It remembers its bus,
-source and settings in `%APPDATA%\O-AUD-TX\settings.ini`, and accepts `--bus NAME`,
-`--input NAME` and `--loopback NAME` (`default` selects the system default device).
+The O-AUD-TX application sends **ROUTES**: each route takes one source to its own bus,
+so one window can send a browser to `Bus 1`, a microphone to `Bus 2` and a media player
+to `Bus 3`. **+ ADD** starts a route from the default input to a new bus; **REMOVE**
+stops the selected one. Each row shows the route's bus, source, state and level; select a
+route to edit its bus name, send controls and source on the right.
 
-![O-AUD-TX application sending an input device, with its AUDIO SOURCE panel](docs/o-aud-tx-app.png)
+The **AUDIO SOURCE** panel lists input devices, output devices and applications. An output device sends whatever Windows mixes to it, from any
+application. While capturing an output, the application keeps a silent stream open on
+it, so the bus keeps running through silence. Don't play the bus on the device it
+captures: that feeds back.
+
+**APPLICATIONS** lists the programs that have audio sessions, marking those that play.
+Picking one sends only what that program and its child processes play (Windows 10
+version 2004 or later), whichever device it plays on, so a browser or a game can go to
+its own bus while you keep listening to it. The source is remembered by executable name: when
+the program is not running, the panel says so and the capture starts when it does, and
+it follows the program when it restarts. While the program is quiet, the application
+sends silence, so the bus keeps running.
+
+It remembers its routes in `%APPDATA%\O-AUD-TX\settings.ini` (a file of an earlier
+version becomes the first route), and accepts `--bus NAME`, `--input NAME`,
+`--loopback NAME` (`default` selects the system default device) and `--application EXE`.
+A bus and a source make a route; repeat them for more routes. They set the saved routes
+in order and add routes as needed:
+
+```powershell
+o-aud-tx --bus Browser --application brave.exe --bus Voice --input default --bus Media --application vlc.exe
+```
+
+![O-AUD-TX application with three routes: a browser, a microphone and a media player, each on its own bus](docs/o-aud-tx-app.png)
 
 Build them with:
 
@@ -246,8 +309,8 @@ The bundles are written to `target/bundled/`, the applications to
 `target/release/o-aud-rx.exe` and `target/release/o-aud-tx.exe`.
 
 Limitations: buses carry up to 8 channels (the plugins use mono and stereo layouts, the
-O-AUD-TX application sends up to 8 device channels); loopback captures a whole output
-device, not a single application;
+O-AUD-TX application sends up to 8 device channels); an application is captured in
+stereo, and with all its child processes;
 transmitter and receivers must run on the same computer and, on Windows, in the same
 user session; a transmitter whose clock is more than 0.5 % off cannot be followed
 without dropouts. See [Audio bus design](docs/audio-bus.md).
@@ -330,8 +393,8 @@ spectrum curves they had hidden. Removing a bus removes it from every view.
 
 In a DAW, put O-AUD-TX last on the tracks or groups you want to compare (THRU on, so
 the mix is unchanged) and O-AUD-A on the master, then add their buses. A reference
-playing in another application reaches O-AUD-A through the O-AUD-TX application's
-loopback capture. Buses are measured at their own sample rate, so their rates need not
+playing in another application reaches O-AUD-A through a route of the O-AUD-TX
+application: pick the player under APPLICATIONS, or capture its output device. Buses are measured at their own sample rate, so their rates need not
 match. Sources are not time-aligned with the input: overlays compare signals, they do
 not line them up, and each oscilloscope trace has its own trigger. Sources and every
 view's signals are saved with the session by name.
@@ -444,7 +507,7 @@ Speex (Valin, 2007) and is implemented here on top of realfft.
 
 Pushing a tag `vX.Y.Z` that matches the version in `Cargo.toml` runs the
 [release workflow](.github/workflows/release.yml): it runs every CI check, builds the
-VST3 and CLAP bundles and the four applications, and publishes a GitHub release with
+VST3 and CLAP bundles and the five applications, and publishes a GitHub release with
 `O-AT-X.Y.Z-windows-x64.zip` (installation notes in
 [INSTALL.txt](packaging/INSTALL.txt)) and its SHA-256 checksum. The workflow can also be
 started by hand with a version.

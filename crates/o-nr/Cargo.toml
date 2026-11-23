@@ -1,0 +1,38 @@
+[package]
+name = "o-nr"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["baalintnagy"]
+license = "MIT"
+description = "O-NR (Open Noise Reduction): noise profile based denoiser for any material"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "o-nr-standalone"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[features]
+# Standalone application for trying the plugin without a host.
+standalone = ["nih_plug/standalone"]
+
+[dependencies]
+aud-ui = { path = "../aud-ui", features = ["nih-plug"] }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101" }
+realfft = "3.5"
+serde = { version = "1", features = ["derive"] }
+triple_buffer = "9.0"
+
+[build-dependencies]
+# Embeds the icon and version information in Windows executables.
+winresource = "0.1"
+
+[dev-dependencies]
+# Same source as NIH-plug's `assert_process_allocs`, so tests share its allocation guard.
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
+serde_json = "1"

@@ -52,10 +52,29 @@ impl InterleavedSender {
                     channel[frame] = to_f32(sample);
                 }
             }
-            let planar = &self.planar;
-            let views: [&[f32]; MAX_CHANNELS] =
-                array::from_fn(|index| planar.get(index).map_or(&[][..], |c| &c[..frames]));
-            self.port.process(&views[..planar.len()], gain);
+            self.process(frames, gain);
         }
+    }
+
+    /// Sends `frames` frames of silence, for a capture that delivers nothing while its
+    /// source is quiet. `gain` keeps the port's gain ramp in step. Real-time safe.
+    pub fn send_silence(&mut self, frames: u64, gain: f32) {
+        let mut due = frames;
+        while due > 0 {
+            let block = due.min(MAX_BLOCK_FRAMES as u64) as usize;
+            for channel in &mut self.planar {
+                channel[..block].fill(0.0);
+            }
+            self.process(block, gain);
+            due -= block as u64;
+        }
+    }
+
+    /// Sends the first `frames` frames of the scratch channels.
+    fn process(&mut self, frames: usize, gain: f32) {
+        let planar = &self.planar;
+        let views: [&[f32]; MAX_CHANNELS] =
+            array::from_fn(|index| planar.get(index).map_or(&[][..], |c| &c[..frames]));
+        self.port.process(&views[..planar.len()], gain);
     }
 }

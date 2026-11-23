@@ -1,14 +1,15 @@
-O-NEC, O-AUD-TX, O-AUD-RX and O-AUD-A for Windows (x64)
-=======================================================
+O-NEC, O-NR, O-AUD-TX, O-AUD-RX and O-AUD-A for Windows (x64)
+==============================================================
 
 Contents
 --------
-VST3\O-NEC.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3, O-AUD-A.vst3    VST3 plugins
-CLAP\O-NEC.clap, O-AUD-TX.clap, O-AUD-RX.clap, O-AUD-A.clap    CLAP plugins
+VST3\O-NEC.vst3, O-NR.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3, O-AUD-A.vst3   VST3 plugins
+CLAP\O-NEC.clap, O-NR.clap, O-AUD-TX.clap, O-AUD-RX.clap, O-AUD-A.clap    CLAP plugins
 O-AUD-RX.exe                    Plays a bus on any output device
-O-AUD-TX.exe                    Sends an input, or what an output plays, to a bus
+O-AUD-TX.exe                    Sends an input, an output or an application to a bus
 O-AUD-A-standalone.exe          Analyzes an audio input device
 O-NEC-standalone.exe            O-NEC without a plugin host
+O-NR-standalone.exe             O-NR without a plugin host
 
 Install the plugins
 -------------------
@@ -38,13 +39,26 @@ the same permission level.
 O-AUD-RX.exe remembers its bus, device and settings in %APPDATA%\O-AUD-RX\settings.ini
 and accepts --bus NAME and --device NAME.
 
-O-AUD-TX.exe sends an input device, or everything an output device plays, to a bus:
-pick the source under AUDIO SOURCE. To send a single application, set its output to a
-device you don't listen to (Windows Settings > Sound > Volume mixer) and pick that
-device. Don't play the bus on the device it captures, which feeds back. It remembers
-its bus, source and settings in %APPDATA%\O-AUD-TX\settings.ini and accepts --bus NAME,
---input NAME and --loopback NAME ("default" selects the system default device).
+O-AUD-TX.exe sends routes, each from one source to its own bus: an input device,
+everything an output device plays, or what a single application plays. + ADD and REMOVE
+under ROUTES add and stop routes; pick the selected route's source under AUDIO SOURCE.
+APPLICATIONS lists the programs with audio; picking one sends that program and its child
+processes (Windows 10 version 2004 or later) and follows it when it restarts. Don't play
+a bus on the output device it captures, which feeds back. It remembers its routes in
+%APPDATA%\O-AUD-TX\settings.ini and accepts --bus NAME, --input NAME, --loopback NAME
+("default" selects the system default device) and --application EXE. A bus and a source
+make a route; repeat them for more routes, for example
+--bus Browser --application brave.exe --bus Voice --input default.
 O-AUD-TX.exe replaces O-AUD-TX-standalone.exe; delete the earlier file.
+
+Remove noise
+------------
+Insert O-NR on any track. Play a passage where only the noise is heard, press LEARN,
+then press STOP LEARNING: that spectrum becomes the noise profile, stored with the
+session. Raise Reduction for more attenuation and Threshold to treat more as noise;
+LISTEN REMOVED plays what is taken away. Without a profile, or with Adaptive, O-NR
+tracks steady noise under the signal by itself. Higher Resolution separates hum and
+other steady tones better but adds delay, which hosts compensate.
 
 Analyze audio
 -------------
@@ -64,7 +78,7 @@ settings, INPUT and each bus; several are overlaid in their colors. Every view s
 every bus until you switch it off there. MATCH LEVEL compares spectrum curves at equal loudness, MASKING shades
 the frequencies where two curves are about equally loud. Put
 O-AUD-TX on the tracks to compare and O-AUD-A on the master, or send a reference track
-with O-AUD-TX.exe's loopback capture.
+from its player with an O-AUD-TX.exe route (APPLICATIONS, or its output device).
 
 O-AUD-A-standalone.exe analyzes an input device and plays nothing back: run it with
 --backend wasapi (see --help for devices and rates).

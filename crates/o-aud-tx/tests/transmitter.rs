@@ -220,3 +220,78 @@ fn replaced_ports_reclaim_the_bus_without_allocating() {
     let format = reader.format().expect("stream started");
     assert_eq!((format.sample_rate, format.channels), (44_100, 1));
 }
+
+#[test]
+fn silence_reaches_the_bus_without_allocating() {
+    let namespace = namespace("silence");
+    let (link, port, _) = start(&namespace, "Silence");
+    let mut sender = InterleavedSender::new(port, 48_000, 2);
+    wait_live(&link, &mut sender);
+    let directory = Directory::open_namespace(&namespace).expect("directory opens");
+    let reader =
+        BusReader::open(&directory, &BusName::new("Silence").expect("valid")).expect("bus exists");
+
+    let block = vec![0.5_f32; 2 * 480];
+    sender.send(&block, 1.0, |sample| sample);
+    // More than one block, so the silence is split.
+    let frames = 2 * MAX_BLOCK_FRAMES + 7;
+    let position = reader.write_position();
+    assert_no_alloc(|| sender.send_silence(frames as u64, 1.0));
+    assert_eq!(reader.write_position() - position, frames as u64);
+    let format = reader.format().expect("stream started");
+    let mut output = vec![1.0; 2 * frames];
+    assert!(reader.read(position, frames, 2, format.epoch, &mut output));
+    assert!(output.iter().all(|&sample| sample == 0.0));
+}
+
+/// Several routes in one process, as in the O-AUD-TX application: each link keeps its
+/// own bus, and every sender stays allocation-free while the others run.
+#[test]
+fn several_transmitters_in_one_process_keep_their_buses() {
+    let namespace = namespace("routes");
+    let names = ["Route 1", "Route 2", "Route 3"];
+    let mut routes: Vec<(TxLink, InterleavedSender)> = names
+        .iter()
+        .map(|name| {
+            let (link, port, _) = start(&namespace, name);
+            let sender = InterleavedSender::new(port, 48_000, 2);
+            (link, sender)
+        })
+        .collect();
+    for (link, sender) in &mut routes {
+        wait_live(link, sender);
+    }
+    let directory = Directory::open_namespace(&namespace).expect("directory opens");
+    let readers: Vec<BusReader> = names
+        .iter()
+        .map(|name| {
+            BusReader::open(&directory, &BusName::new(name).expect("valid")).expect("bus exists")
+        })
+        .collect();
+
+    // Each route sends its own level; settle the gain ramps first.
+    let blocks: Vec<Vec<f32>> = (1..=3)
+        .map(|level| vec![0.1 * level as f32; 2 * 480])
+        .collect();
+    for _ in 0..20 {
+        for ((_, sender), block) in routes.iter_mut().zip(&blocks) {
+            sender.send(block, 1.0, |sample| sample);
+        }
+    }
+    let positions: Vec<u64> = readers.iter().map(BusReader::write_position).collect();
+    assert_no_alloc(|| {
+        for ((_, sender), block) in routes.iter_mut().zip(&blocks) {
+            sender.send(block, 1.0, |sample| sample);
+        }
+    });
+    for ((reader, position), level) in readers.iter().zip(positions).zip([0.1, 0.2, 0.3]) {
+        let format = reader.format().expect("stream started");
+        let mut output = vec![0.0; 2 * 480];
+        assert!(reader.read(position, 480, 2, format.epoch, &mut output));
+        assert!(output.iter().all(|&sample| (sample - level).abs() < 1e-6));
+    }
+    for ((link, _), name) in routes.iter().zip(names) {
+        assert_eq!(link.status().state, TxState::Live);
+        assert_eq!(link.name(), name);
+    }
+}

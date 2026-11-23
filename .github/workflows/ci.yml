@@ -19,7 +19,7 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Lint
-        run: cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone -- -D warnings
+        run: cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone -- -D warnings
       - name: Test
         run: cargo test --workspace --release
       - name: Real-time allocation check (debug build)
@@ -28,22 +28,27 @@ jobs:
         run: cargo test -p audbus -p o-aud-tx -p o-aud-rx
       - name: Analyzer tests with allocation checks (debug build)
         run: cargo test -p o-aud-a
+      - name: Noise reduction tests with allocation checks (debug build)
+        run: cargo test -p o-nr
       - name: Bundle plugins
         run: |
           cargo xtask bundle o-nec --release
           cargo xtask bundle o-aud-tx --release
           cargo xtask bundle o-aud-rx --release
           cargo xtask bundle o-aud-a --release
+          cargo xtask bundle o-nr --release
       - name: Build applications
         run: |
           cargo build --release -p o-aud-rx-app
           cargo build --release -p o-aud-tx-app
           cargo build --release -p o-aud-a --features standalone --bin o-aud-a-standalone
           cargo build --release --features standalone --bin o-nec-standalone
+          cargo build --release -p o-nr --features standalone --bin o-nr-standalone
           Copy-Item target/release/o-aud-rx.exe target/bundled/O-AUD-RX.exe
           Copy-Item target/release/o-aud-tx.exe target/bundled/O-AUD-TX.exe
           Copy-Item target/release/o-aud-a-standalone.exe target/bundled/O-AUD-A-standalone.exe
           Copy-Item target/release/o-nec-standalone.exe target/bundled/O-NEC-standalone.exe
+          Copy-Item target/release/o-nr-standalone.exe target/bundled/O-NR-standalone.exe
       - uses: actions/upload-artifact@v4
         with:
           name: o-at-windows-x64

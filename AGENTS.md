@@ -52,8 +52,10 @@ buffer and parameters. Keep `Telemetry` fixed-size.
 
 O-AUD-TX, O-AUD-RX and their applications live in `crates/`; see
 [docs/audio-bus.md](docs/audio-bus.md). The same real-time rules apply to
-`TxPort::process`, `InterleavedSender::send`, `Receiver::process` and the `BusWriter` and `BusReader` methods they
-call. Their link threads open shared memory, lease names and allocate; resources reach
+`TxPort::process`, `InterleavedSender::send` and `send_silence`, `Receiver::process` and the `BusWriter` and `BusReader` methods they
+call, and to the loop of the O-AUD-TX application's application capture thread
+(`Stream::run` in `crates/o-aud-tx-app/src/application.rs`), which allocates its buffers
+before the stream starts. Their link threads open shared memory, lease names and allocate; resources reach
 the audio thread only through `audbus::handoff`, which also returns them for dropping.
 Run `cargo test -p audbus -p o-aud-tx -p o-aud-rx` (a debug build, with allocation checks)
 after changing these paths, and extend the allocation tests for new processing modes.
@@ -67,7 +69,8 @@ All editors, O-NEC's and O-AUD-A's included, take their palette and controls fro
 O-AUD-RX editor bodies serve the plugins and the applications. Keep plugin-specific code
 out of `o-aud-tx`'s and `o-aud-rx`'s core modules; the `plugin` and `view` features gate
 NIH-plug and egui. A port replaced with `TxLink::replace_port` reclaims the bus, so drop
-the previous port (its device stream) first.
+the previous port (its device stream) first. Each route of the O-AUD-TX application owns
+its link and capture; a route drops its capture before its link.
 
 # Audio analyzer
 
@@ -83,6 +86,17 @@ never rename them. O-AUD-A opens its own editor
 window (`crates/o-aud-a/src/window.rs`) so it can resize itself; keep it in step with
 `nih_plug_egui` when updating NIH-plug.
 
+# Noise reduction
+
+O-NR lives in `crates/o-nr`; see [docs/o-nr.md](docs/o-nr.md). Its whole engine runs in
+`Engine::process` on the audio thread, so `Engine::configure` allocates every buffer for
+the largest resolution, and switching resolution, learning and loading profiles must
+stay allocation-free. The learned profile reaches the audio thread only through the
+lock-free `ProfileStore`, which is also its `#[persist = "profile"]` state; never change
+the serialized `ProfileData` fields. Run `cargo test -p o-nr` (a debug build, with
+allocation checks) after changing the audio path, and extend `tests/realtime.rs` for new
+modes.
+
 # Latency contract
 
 The latency reported to the host must equal the measured impulse delay at every
@@ -91,12 +105,14 @@ disabled. Only the noise model choice changes the delay; the plugin reports the 
 latency when it changes. When changing a stage's delay, update its delay constant and
 keep `reported_latency_matches_impulse_delay` passing for both noise models.
 O-AUD-TX and O-AUD-A add no delay and O-AUD-RX reports none: its buffering belongs to
-an external stream that a host cannot compensate.
+an external stream that a host cannot compensate. O-NR's delay is its FFT size, which
+only the Resolution parameter changes; keep its `reported_latency_matches_impulse_delay`
+passing for every resolution.
 
 # Parameter compatibility
 
 Parameter IDs (`#[id = "..."]`) and `#[persist]` keys are stored in host sessions
-and presets, for O-NEC, O-AUD-TX, O-AUD-RX and O-AUD-A alike. Never rename or reuse
+and presets, for O-NEC, O-NR, O-AUD-TX, O-AUD-RX and O-AUD-A alike. Never rename or reuse
 them. Add new parameters with new IDs. The VST3 class IDs and CLAP IDs are equally permanent.
 
 # Dependencies
