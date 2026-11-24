@@ -4,17 +4,80 @@ on:
   push:
     branches: [main]
   pull_request:
-  # The release workflow runs this workflow and publishes its artifact.
+  # The release workflow runs this workflow and publishes its Windows and Linux artifacts.
   workflow_call:
 
 jobs:
+  # The oldest Rust that builds the workspace, the `rust-version` in Cargo.toml.
+  msrv:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        shell: bash
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          rustup toolchain install "$msrv" --profile minimal
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: Check
+        run: cargo +${{ env.MSRV }} check --locked --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone
+
+  # The Linux build: lint, the audio bus's Unix shared memory (memory-mapped files in
+  # /dev/shm), and the plugins and applications of the Linux release. Ubuntu 22.04's glibc
+  # (2.35) keeps the binaries running on older distributions.
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install
+      # The editors' windowing and OpenGL libraries and ALSA, which NIH-plug links.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-jackd2-dev libx11-xcb-dev \
+            libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone -- -D warnings
+      - name: Audio bus tests with allocation checks (debug build)
+        run: cargo test --locked -p audbus
+      - name: Bundle plugins
+        run: |
+          for plugin in o-nec o-aud-tx o-aud-rx o-aud-a o-nr; do
+            cargo xtask bundle "$plugin" --release
+          done
+      - name: Build applications
+        run: |
+          cargo build --locked --release -p o-aud-rx-app -p o-aud-tx-app
+          cargo build --locked --release -p o-aud-a --features standalone --bin o-aud-a-standalone
+          cargo build --locked --release -p o-nec --features standalone --bin o-nec-standalone
+          cargo build --locked --release -p o-nr --features standalone --bin o-nr-standalone
+          cp target/release/o-aud-rx target/bundled/O-AUD-RX
+          cp target/release/o-aud-tx target/bundled/O-AUD-TX
+          cp target/release/o-aud-a-standalone target/bundled/O-AUD-A-standalone
+          cp target/release/o-nec-standalone target/bundled/O-NEC-standalone
+          cp target/release/o-nr-standalone target/bundled/O-NR-standalone
+      # Artifacts lose file permissions, so the executables travel in a tar archive.
+      - name: Archive
+        run: tar -C target/bundled -cf o-at-linux-x64.tar .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: o-at-linux-x64
+          path: o-at-linux-x64.tar
+          if-no-files-found: error
+
   check:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # Installs the toolchain pinned in rust-toolchain.toml, with rustfmt and Clippy.
+      - name: Toolchain
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
@@ -23,7 +86,7 @@ jobs:
       - name: Test
         run: cargo test --workspace --release
       - name: Real-time allocation check (debug build)
-        run: cargo test --test realtime
+        run: cargo test -p o-nec --test realtime
       - name: Audio bus tests with allocation checks (debug build)
         run: cargo test -p audbus -p o-aud-tx -p o-aud-rx
       - name: Analyzer tests with allocation checks (debug build)
@@ -42,7 +105,7 @@ jobs:
           cargo build --release -p o-aud-rx-app
           cargo build --release -p o-aud-tx-app
           cargo build --release -p o-aud-a --features standalone --bin o-aud-a-standalone
-          cargo build --release --features standalone --bin o-nec-standalone
+          cargo build --release -p o-nec --features standalone --bin o-nec-standalone
           cargo build --release -p o-nr --features standalone --bin o-nr-standalone
           Copy-Item target/release/o-aud-rx.exe target/bundled/O-AUD-RX.exe
           Copy-Item target/release/o-aud-tx.exe target/bundled/O-AUD-TX.exe

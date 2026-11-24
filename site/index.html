@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O-AT · Open Audio Tools</title>
+<meta name="description" content="Open source VST3 and CLAP audio plugins and applications written in Rust: voice cleanup, noise reduction, audio routing between hosts and devices, and an audio analyzer.">
+<link rel="icon" type="image/png" href="img/o-at.png">
+<style>
+/* Colors follow the editors' palette in crates/aud-ui/src/theme.rs. */
+:root {
+  --background: #121419;
+  --panel: #1a1d24;
+  --raised: #22262f;
+  --border: #2b303b;
+  --text: #d6dbe4;
+  --dim: #808897;
+  --faint: #555c6a;
+  --o-nec: #5ca8ff;
+  --o-nr: #f5d04c;
+  --send: #ff8a3d;
+  --receive: #3cd6c0;
+  --analyze: #c6e05a;
+  --link: #5ca8ff;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+  font: 0.9em ui-monospace, "Cascadia Code", Consolas, monospace;
+  background: var(--raised);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+header.top {
+  position: sticky; top: 0; z-index: 2;
+  background: rgba(18, 20, 25, 0.92);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+}
+header.top .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); }
+.brand img { width: 28px; height: 28px; }
+nav { display: flex; gap: 18px; margin-left: auto; font-size: 0.95rem; overflow-x: auto; }
+nav a { color: var(--dim); white-space: nowrap; }
+nav a:hover { color: var(--text); text-decoration: none; }
+.hero { padding: 72px 0 48px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; }
+.hero h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.1; margin: 0 0 16px; }
+.hero h1 span { color: var(--dim); font-weight: 500; display: block; font-size: 0.5em; margin-top: 8px; }
+.hero p { color: var(--dim); font-size: 1.1rem; margin: 0 0 28px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 12px; }
+.button {
+  display: inline-block; padding: 11px 20px; border-radius: 8px; font-weight: 600;
+  border: 1px solid var(--border); color: var(--text); background: var(--raised);
+}
+.button.primary { background: var(--o-nec); border-color: var(--o-nec); color: #0c1016; }
+.button:hover { text-decoration: none; filter: brightness(1.1); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+.chip { font-size: 0.8rem; color: var(--dim); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+.shot { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); }
+.tools-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 8px 0 72px; }
+.tool-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 18px; color: var(--text); border-top: 3px solid var(--accent);
+}
+.tool-card:hover { text-decoration: none; background: var(--raised); }
+.tool-card img { width: 40px; height: 40px; }
+.tool-card h3 { margin: 10px 0 4px; font-size: 1.05rem; }
+.tool-card p { margin: 0; color: var(--dim); font-size: 0.92rem; }
+section.tool { padding: 56px 0; border-top: 1px solid var(--border); scroll-margin-top: 56px; }
+.tool-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.tool-head img { width: 48px; height: 48px; }
+.tool-head h2 { margin: 0; font-size: 1.9rem; }
+.tool-head .kind { color: var(--dim); font-size: 0.95rem; }
+.lead { color: var(--dim); font-size: 1.08rem; max-width: 760px; margin: 0 0 24px; }
+.split { display: grid; grid-template-columns: 1fr 1.25fr; gap: 40px; align-items: start; }
+ul.points { margin: 0; padding: 0; list-style: none; }
+ul.points li { position: relative; padding-left: 20px; margin-bottom: 10px; }
+ul.points li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); }
+.more { margin-top: 18px; font-size: 0.95rem; }
+.gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 24px; }
+.gallery figure { margin: 0; }
+.gallery figcaption { color: var(--dim); font-size: 0.85rem; margin-top: 6px; }
+.steps { counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.step { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+.step::before {
+  counter-increment: step; content: counter(step);
+  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--raised); color: var(--text); font-weight: 700; margin-bottom: 10px;
+}
+.step h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.platform { margin: 0 0 12px; font-size: 1.1rem; color: var(--text); }
+.platform + .steps { margin-bottom: 32px; }
+pre {
+  margin: 10px 0 0; padding: 10px 12px; overflow-x: auto;
+  background: var(--raised); border-radius: 6px; font-size: 0.85rem;
+}
+pre code { padding: 0; background: none; }
+.step p { margin: 0; color: var(--dim); font-size: 0.95rem; }
+footer { border-top: 1px solid var(--border); padding: 32px 0 48px; color: var(--faint); font-size: 0.88rem; }
+footer p { margin: 0 0 8px; }
+footer a { color: var(--dim); }
+@media (max-width: 900px) {
+  .hero, .split { grid-template-columns: 1fr; }
+  .tools-grid { grid-template-columns: repeat(2, 1fr); }
+  .gallery { grid-template-columns: repeat(2, 1fr); }
+  .steps { grid-template-columns: 1fr; }
+  nav { display: none; }
+}
+@media (max-width: 520px) {
+  .tools-grid, .gallery { grid-template-columns: 1fr; }
+  .hero { padding-top: 40px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="img/o-at.png" alt="">O-AT</a>
+    <nav>
+      <a href="#o-nec">O-NEC</a>
+      <a href="#o-nr">O-NR</a>
+      <a href="#o-aud-tx-rx">O-AUD-TX / RX</a>
+      <a href="#o-aud-a">O-AUD-A</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/baalintnagy/o-at">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <h1>O-AT <span>Open Audio Tools</span></h1>
+      <p>Open source audio plugins and applications for Windows and Linux, written in Rust:
+      voice cleanup, noise reduction, audio routing between hosts, applications and
+      devices, and an audio analyzer.</p>
+      <div class="buttons">
+        <a class="button primary" href="https://github.com/baalintnagy/o-at/releases/latest">Download for Windows</a>
+        <a class="button primary" href="https://github.com/baalintnagy/o-at/releases/latest">Download for Linux</a>
+        <a class="button" href="https://github.com/baalintnagy/o-at">Source on GitHub</a>
+      </div>
+      <div class="chips">
+        <span class="chip">VST3</span><span class="chip">CLAP</span>
+        <span class="chip">Standalone apps</span><span class="chip">Windows x64</span>
+        <span class="chip">Linux x64</span>
+        <span class="chip">MIT licensed</span>
+      </div>
+    </div>
+    <img class="shot" src="img/o-aud-a-overview.png" width="1180" height="760" alt="O-AUD-A overview with spectral view, stereo imager, spectrum, oscilloscope and loudness meter">
+  </section>
+
+  <div class="tools-grid">
+    <a class="tool-card" href="#o-nec" style="--accent: var(--o-nec)">
+      <img src="img/o-nec.png" alt=""><h3>O-NEC</h3>
+      <p>Noise suppression, echo cancellation, voice gate and speech leveler.</p>
+    </a>
+    <a class="tool-card" href="#o-nr" style="--accent: var(--o-nr)">
+      <img src="img/o-nr.png" alt=""><h3>O-NR</h3>
+      <p>Noise reduction for any material, from a learned noise profile.</p>
+    </a>
+    <a class="tool-card" href="#o-aud-tx-rx" style="--accent: var(--send)">
+      <img src="img/o-aud-tx.png" alt=""><h3>O-AUD-TX / RX</h3>
+      <p>Route audio between hosts, applications and devices through named buses.</p>
+    </a>
+    <a class="tool-card" href="#o-aud-a" style="--accent: var(--analyze)">
+      <img src="img/o-aud-a.png" alt=""><h3>O-AUD-A</h3>
+      <p>Spectrum, sonogram, stereo, oscilloscope, loudness and 3D views.</p>
+    </a>
+  </div>
+
+  <section class="tool" id="o-nec" style="--accent: var(--o-nec)">
+    <div class="tool-head"><img src="img/o-nec.png" alt=""><div><h2>O-NEC</h2><div class="kind">Open Noise and Echo Cancelation · VST3, CLAP, standalone</div></div></div>
+    <p class="lead">What voice chat applications do to your microphone, as a plugin you can put
+    on any microphone chain, with adjustable parameters and detailed visual feedback.</p>
+    <div class="split">
+      <ul class="points">
+        <li><strong>Noise suppression</strong> with a choice of two neural models: RNNoise for
+        steady noise (32 ms total latency) or DeepFilterNet3, which also removes keyboards and
+        other non-stationary noise (72 ms).</li>
+        <li><strong>Echo cancellation</strong> learns the loudspeaker-to-microphone path from the
+        Echo Reference sidechain, plus a residual echo suppressor.</li>
+        <li><strong>Voice gate</strong> that opens on detected speech or above a level.</li>
+        <li><strong>Speech leveler</strong> that raises whispering and lowers shouting, measured
+        only while someone speaks.</li>
+        <li><strong>Listen removed</strong> solos what the chain takes away, to tune settings
+        without damaging speech.</li>
+      </ul>
+      <img class="shot" src="img/o-nec-editor.png" width="1202" height="712" alt="O-NEC editor with spectrum analyzer, activity timeline and meters" loading="lazy">
+    </div>
+    <p class="more"><a href="https://github.com/baalintnagy/o-at#o-nec">Parameters, latency and limitations</a> ·
+    <a href="https://github.com/baalintnagy/o-at/blob/main/docs/dsp.md">DSP design</a></p>
+  </section>
+
+  <section class="tool" id="o-nr" style="--accent: var(--o-nr)">
+    <div class="tool-head"><img src="img/o-nr.png" alt=""><div><h2>O-NR</h2><div class="kind">Open Noise Reduction · VST3, CLAP, standalone</div></div></div>
+    <p class="lead">Removes noise from any material: music, field recordings, film dialogue and
+    voice. It learns what the noise sounds like from a passage where only the noise is heard,
+    then removes it wherever it lies under the signal.</p>
+    <div class="split">
+      <ul class="points">
+        <li>Press <strong>LEARN</strong> during a noise-only passage; the profile is stored with
+        the session.</li>
+        <li>Without a profile, or in <strong>Adaptive</strong> mode, it tracks steady noise under
+        the signal by itself.</li>
+        <li><strong>Reduction</strong>, <strong>Threshold</strong> and <strong>Resolution</strong>:
+        higher resolutions separate hum and other steady tones better, at more delay, which
+        hosts compensate.</li>
+        <li><strong>Listen removed</strong> plays what is taken away.</li>
+      </ul>
+      <img class="shot" src="img/o-nr-editor.png" width="996" height="639" alt="O-NR editor" loading="lazy">
+    </div>
+    <p class="more"><a href="https://github.com/baalintnagy/o-at#o-nr">Controls</a> ·
+    <a href="https://github.com/baalintnagy/o-at/blob/main/docs/o-nr.md">How it works</a></p>
+  </section>
+
+  <section class="tool" id="o-aud-tx-rx" style="--accent: var(--send)">
+    <div class="tool-head"><img src="img/o-aud-tx.png" alt=""><div><h2>O-AUD-TX and O-AUD-RX</h2><div class="kind">Audio routing · VST3, CLAP, applications</div></div></div>
+    <p class="lead">Route audio between hosts, applications and devices through named buses,
+    for example from a DAW to a voice chat application or to headphones on another
+    interface. Buses live in shared memory and need no server or virtual driver.</p>
+    <div class="split">
+      <ul class="points">
+        <li><strong>O-AUD-TX</strong> sends its track to a bus with a name you choose; its own
+        output passes through or is muted.</li>
+        <li><strong>O-AUD-RX</strong> plays a bus inside any host, or on any output device with
+        the standalone application, resampling to follow the sender's clock.</li>
+        <li>The <strong>O-AUD-TX application</strong> sends any number of routes: an input
+        device, everything an output device plays, or what a single application plays
+        (the last two on Windows).</li>
+        <li>Any number of receivers can play the same bus; O-AUD-TX shows its listeners.</li>
+      </ul>
+      <img class="shot" src="img/o-aud-tx-app.png" width="1150" height="795" alt="O-AUD-TX application with its routes" loading="lazy">
+    </div>
+    <div class="gallery">
+      <figure><img class="shot" src="img/o-aud-tx-plugin.png" width="682" height="432" alt="O-AUD-TX plugin" loading="lazy"><figcaption>O-AUD-TX plugin</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-rx-editor.png" width="952" height="834" alt="O-AUD-RX" loading="lazy"><figcaption>O-AUD-RX</figcaption></figure>
+    </div>
+    <p class="more"><a href="https://github.com/baalintnagy/o-at#o-aud-tx-and-o-aud-rx">Usage</a> ·
+    <a href="https://github.com/baalintnagy/o-at/blob/main/docs/audio-bus.md">Audio bus design</a></p>
+  </section>
+
+  <section class="tool" id="o-aud-a" style="--accent: var(--analyze)">
+    <div class="tool-head"><img src="img/o-aud-a.png" alt=""><div><h2>O-AUD-A</h2><div class="kind">Audio analyzer · VST3, CLAP, standalone</div></div></div>
+    <p class="lead">Insert it anywhere; it passes the audio through unchanged. Its pages show a
+    spectrum analyzer, a sonogram, a stereo imager, an oscilloscope, an EBU R 128 loudness
+    meter and 3D spectrum and stereo views, side by side on a resizable overview.</p>
+    <div class="split">
+      <ul class="points">
+        <li><strong>Sources</strong>: compare buses from O-AUD-TX with the input, each in its
+        own color, with level matching and masking.</li>
+        <li><strong>Platforms</strong> shows what streaming services' loudness normalization
+        does to the track.</li>
+        <li>Full screen, free resizing, and per-view settings and colors.</li>
+      </ul>
+      <img class="shot" src="img/o-aud-a-spectral.png" width="1180" height="760" alt="O-AUD-A spectral view: waveform over the sonogram" loading="lazy">
+    </div>
+    <div class="gallery">
+      <figure><img class="shot" src="img/o-aud-a-spectrum.png" width="1180" height="760" alt="Spectrum" loading="lazy"><figcaption>Spectrum</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-a-sonogram.png" width="1180" height="760" alt="Sonogram" loading="lazy"><figcaption>Sonogram</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-a-stereo.png" width="1180" height="760" alt="Stereo imager" loading="lazy"><figcaption>Stereo imager</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-a-loudness.png" width="1180" height="760" alt="Loudness meter" loading="lazy"><figcaption>Loudness</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-a-compare.png" width="1180" height="760" alt="Comparing sources" loading="lazy"><figcaption>Comparing sources</figcaption></figure>
+      <figure><img class="shot" src="img/o-aud-a-3d.png" width="1180" height="760" alt="3D view" loading="lazy"><figcaption>3D view</figcaption></figure>
+    </div>
+    <p class="more"><a href="https://github.com/baalintnagy/o-at#o-aud-a">Pages and controls</a> ·
+    <a href="https://github.com/baalintnagy/o-at/blob/main/docs/o-aud-a.md">How it works</a></p>
+  </section>
+
+  <section class="tool" id="install" style="--accent: var(--receive)">
+    <div class="tool-head"><div><h2>Install</h2><div class="kind">Windows x64 · Linux x64</div></div></div>
+    <h3 class="platform">Windows</h3>
+    <div class="steps">
+      <div class="step"><h3>Download</h3><p>Get <code>O-AT-X.Y.Z-windows-x64.zip</code> from the
+        <a href="https://github.com/baalintnagy/o-at/releases/latest">latest release</a> and
+        unpack it.</p></div>
+      <div class="step"><h3>Copy the plugins</h3><p>Copy the folders in <code>VST3</code> to
+        <code>C:\Program Files\Common Files\VST3</code> and the files in <code>CLAP</code> to
+        <code>…\Common Files\CLAP</code> (administrator rights needed).</p></div>
+      <div class="step"><h3>Rescan</h3><p>Rescan plugins in your host; they are listed under
+        the vendor <code>o-at</code>. The applications run from any folder.</p></div>
+    </div>
+    <h3 class="platform">Linux</h3>
+    <div class="steps">
+      <div class="step"><h3>Download</h3><p>Get <code>O-AT-X.Y.Z-linux-x64.tar.gz</code> from the
+        <a href="https://github.com/baalintnagy/o-at/releases/latest">latest release</a> and
+        unpack it. It needs glibc 2.35 or later (Ubuntu 22.04, Debian 12) and X11 or
+        XWayland.</p></div>
+      <div class="step"><h3>Copy the plugins</h3><p>Into your home folder, no root
+        needed:</p>
+        <pre><code>mkdir -p ~/.vst3 ~/.clap
+cp -r VST3/*.vst3 ~/.vst3/
+cp CLAP/*.clap ~/.clap/</code></pre></div>
+      <div class="step"><h3>Rescan</h3><p>Rescan plugins in your host. The applications run
+        from the unpacked folder; O-AUD-TX sends input devices on Linux.</p></div>
+    </div>
+    <p class="more">Details in <a href="https://github.com/baalintnagy/o-at/blob/main/packaging/INSTALL.txt">INSTALL.txt</a> (Windows) and
+    <a href="https://github.com/baalintnagy/o-at/blob/main/packaging/INSTALL-linux.txt">INSTALL-linux.txt</a>.
+    To build from source, see the <a href="https://github.com/baalintnagy/o-at#build">README</a>.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>O-AT is built with Rust on <a href="https://github.com/robbert-vdh/nih-plug">NIH-plug</a>
+    and <a href="https://github.com/emilk/egui">egui</a>, with
+    <a href="https://github.com/jneem/nnnoiseless">nnnoiseless</a> and
+    <a href="https://github.com/Rikorose/DeepFilterNet">DeepFilterNet</a>. Its audio paths
+    are tested for allocations and, on Linux, with RealtimeSanitizer.</p>
+    <p>Source code under the <a href="https://github.com/baalintnagy/o-at/blob/main/LICENSE">MIT License</a>.
+    Built VST3 binaries include GPLv3-licensed VST3 bindings; see
+    <a href="https://github.com/baalintnagy/o-at/blob/main/NOTICE.md">NOTICE</a>.
+    VST is a registered trademark of Steinberg Media Technologies GmbH.</p>
+  </div>
+</footer>
+</body>
+</html>

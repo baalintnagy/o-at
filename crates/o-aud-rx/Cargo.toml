@@ -1,10 +1,10 @@
 [package]
 name = "o-aud-rx"
-version = "0.6.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "O-AUD-RX: plays a named audio bus, as a plugin and as the core of the standalone receiver"
 publish = false
 
@@ -28,3 +28,4 @@ rubato = "5.1"
 
 [dev-dependencies]
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
+rt-check = { path = "../rt-check" }

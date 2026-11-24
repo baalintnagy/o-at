@@ -17,7 +17,7 @@ host rate ─► block of 10 ms ─► FFT resampler ─► 480 samples @ 48 kHz
 
 ## Framing and latency
 
-[`StreamProcessor`](../src/dsp/stream.rs) collects one 10 ms block at the host rate,
+[`StreamProcessor`](../crates/o-nec/src/dsp/stream.rs) collects one 10 ms block at the host rate,
 which requires the host rate to be a multiple of 100 Hz. At 48 kHz the block is used
 directly. Other rates use rubato's synchronous FFT resampler with both chunk sizes
 fixed, so every host block maps to exactly one internal frame. Output lags input by:
@@ -38,7 +38,7 @@ value for both models.
 
 ## Echo canceller
 
-[`EchoCanceller`](../src/dsp/aec.rs) is a partitioned-block frequency-domain adaptive
+[`EchoCanceller`](../crates/o-nec/src/dsp/aec.rs) is a partitioned-block frequency-domain adaptive
 filter (PBFDAF) with 480-sample partitions and 960-point FFTs, covering 50–500 ms.
 It uses overlap-save convolution and a gradient constraint on every partition, which
 keeps the time-domain filter causal and avoids circular-convolution errors.
@@ -67,7 +67,7 @@ the expected residual echo.
 
 ## Residual echo suppressor
 
-[`EchoSuppressor`](../src/dsp/suppressor.rs) analyzes the canceller output and echo
+[`EchoSuppressor`](../crates/o-nec/src/dsp/suppressor.rs) analyzes the canceller output and echo
 estimate with a 960-point sqrt-Hann STFT at 50% overlap. The residual echo power per
 bin is the echo estimate power scaled by the leakage and an overdrive derived from the
 **Echo Suppression** setting, held with an exponential decay for reverberation. The
@@ -77,7 +77,7 @@ echo, the stage is an exact delay.
 
 ## Noise suppression
 
-[`Denoiser`](../src/dsp/denoise.rs) runs RNNoise through nnnoiseless on every frame.
+[`Denoiser`](../crates/o-nec/src/dsp/denoise.rs) runs RNNoise through nnnoiseless on every frame.
 DeepFilterNet, when selected, replaces RNNoise's output; RNNoise keeps running for the
 voice probability.
 RNNoise computes 22 band gains and a voice probability with a small recurrent network
@@ -88,13 +88,15 @@ has a voice probability.
 
 ### DeepFilterNet
 
-[`DeepFilter`](../src/dsp/deep_filter.rs) runs libDF's DeepFilterNet3 model (ERB gains
+[`DeepFilter`](../crates/o-nec/src/dsp/deep_filter.rs) runs libDF's DeepFilterNet3 model (ERB gains
 plus deep filtering of the lower spectrum, 960-point STFT with 480-sample hop and two
 frames of lookahead) through tract. Its inference allocates on every frame, so it runs on
 a worker thread:
 
 1. The audio thread pushes each frame, with a sequence number, into a lock-free `rtrb`
-   ring buffer and unparks the worker.
+   ring buffer. In real time it does not wake the worker, which would be a system call;
+   the worker polls the ring every 1 ms while frames arrive and every 20 ms otherwise.
+   Offline rendering wakes the worker for each frame.
 2. The worker processes frames in order and pushes results into a second ring buffer.
    It loads the model when the first frame arrives, and restarts the model's stream when
    a sequence number is skipped (reset, dropped frames, re-enabling).
@@ -113,7 +115,7 @@ about −60 dBFS before inference.
 
 ## Voice gate
 
-[`Gate`](../src/dsp/gate.rs) opens when RNNoise's voice probability or the frame level
+[`Gate`](../crates/o-nec/src/dsp/gate.rs) opens when RNNoise's voice probability or the frame level
 crosses the threshold, with hysteresis so it does not chatter at the threshold. It
 holds for the hold time, then releases to the range attenuation. Opening uses a 1.5 ms
 attack. Because RNNoise's voice probability describes input that the RNNoise output
@@ -121,7 +123,7 @@ will only emit one frame later, the gate effectively has 10 ms of lookahead.
 
 ## Speech leveler
 
-[`Leveler`](../src/dsp/leveler.rs) evens out speech levels after the gate, so it only
+[`Leveler`](../crates/o-nec/src/dsp/leveler.rs) evens out speech levels after the gate, so it only
 raises speech that the earlier stages have cleaned. It has two parts:
 
 - **Gain control.** A frame counts as speech when RNNoise's voice probability is at
@@ -146,7 +148,7 @@ so the removed signal is not mixed with gain changes.
 
 ## Metering
 
-The engine keeps a fixed-size [`Telemetry`](../src/telemetry.rs) snapshot and
+The engine keeps a fixed-size [`Telemetry`](../crates/o-nec/src/telemetry.rs) snapshot and
 publishes it through a triple buffer when the editor is open. Spectra use a 2048-point
 Hann-windowed FFT every frame, mapped to 160 logarithmic bands between 20 Hz and
 20 kHz with fast attack and 120 dB/s release. A full-scale sine reads 0 dBFS. The input

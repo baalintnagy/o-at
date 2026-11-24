@@ -1,7 +1,7 @@
 //! The capture path and the analysis worker, end to end.
 //!
 //! Debug builds install NIH-plug's allocation-checking global allocator
-//! (`assert_process_allocs`), which aborts on any allocation inside `assert_no_alloc`.
+//! (`assert_process_allocs`), which aborts on any allocation inside `realtime`.
 //! Run these tests without `--release` for the allocation check.
 
 use std::f32::consts::TAU;
@@ -10,7 +10,6 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use assert_no_alloc::assert_no_alloc;
 use audbus::{BusName, BusWriter, Directory};
 use o_aud_a::analysis::Analyzer;
 use o_aud_a::analysis::bus::SourceState;
@@ -18,6 +17,7 @@ use o_aud_a::capture::capture;
 use o_aud_a::layout::Module;
 use o_aud_a::settings::{AnalyzerSettings, Averaging, ChannelMode, Choice, Lanes, Signal, Window};
 use o_aud_a::sources::SourceList;
+use rt_check::realtime;
 
 const RATE: u32 = 48_000;
 const BLOCK: usize = 480;
@@ -34,7 +34,7 @@ fn capturing_does_not_allocate() {
     capture.set_format(RATE, 2);
     let left = sine_block(0, 0.5);
     let right = sine_block(0, 0.25);
-    assert_no_alloc(|| {
+    realtime(|| {
         // Far more than the ring holds, so the overflow path runs too.
         for _ in 0..1_000 {
             capture.push(&[&left[..], &right[..]]);

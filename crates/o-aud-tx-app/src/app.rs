@@ -451,8 +451,8 @@ struct Row<'a> {
     detail: &'static str,
 }
 
-/// The source list's sections: inputs, outputs and, on Windows, applications. The
-/// selected application stays listed while it is not running.
+/// The source list's sections: inputs and, on Windows, outputs and applications, which
+/// need WASAPI loopback. The selected application stays listed while it is not running.
 fn sections<'a>(
     status: &'a CaptureStatus,
     selected: &'a Source,
@@ -478,17 +478,15 @@ fn sections<'a>(
         };
         Some(default).into_iter().chain(rows).collect()
     };
-    let mut sections = vec![
-        (
-            "INPUTS",
-            devices("System default input", &status.inputs, false),
-        ),
-        (
+    let mut sections = vec![(
+        "INPUTS",
+        devices("System default input", &status.inputs, false),
+    )];
+    if cfg!(windows) {
+        sections.push((
             "OUTPUTS · CAPTURES WHAT THEY PLAY",
             devices("System default output", &status.outputs, true),
-        ),
-    ];
-    if cfg!(windows) {
+        ));
         let mut applications: Vec<Row> = status
             .applications
             .iter()

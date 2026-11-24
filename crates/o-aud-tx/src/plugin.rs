@@ -3,12 +3,13 @@
 use std::num::NonZeroU32;
 use std::sync::{Arc, RwLock};
 
+use aud_ui::export_plugin;
 use aud_ui::param::{ParamControl, ParamSwitch};
 use aud_ui::theme;
 use nih_plug::prelude::{
     AsyncExecutor, AudioIOLayout, AuxiliaryBuffers, BoolParam, Buffer, BufferConfig, ClapFeature,
     ClapPlugin, Editor, FloatParam, FloatRange, InitContext, MidiConfig, Params, Plugin, PortNames,
-    ProcessContext, ProcessStatus, Vst3Plugin, Vst3SubCategory, formatters, nih_export_clap,
+    ProcessContext, ProcessStatus, Vst3Plugin, Vst3SubCategory, formatters,
 };
 use nih_plug_egui::egui::{CentralPanel, Frame};
 use nih_plug_egui::{EguiState, create_egui_editor};
@@ -206,12 +207,4 @@ impl Vst3Plugin for OAudTx {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Tools];
 }
 
-nih_export_clap!(OAudTx);
-// The VST3 bindings' COM macros expand to a trailing semicolon in expression position.
-#[allow(semicolon_in_expressions_from_non_local_macros)]
-mod vst3_export {
-    use super::OAudTx;
-    use nih_plug::nih_export_vst3;
-
-    nih_export_vst3!(OAudTx);
-}
+export_plugin!(OAudTx);

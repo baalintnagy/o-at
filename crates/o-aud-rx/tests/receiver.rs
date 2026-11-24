@@ -10,12 +10,12 @@ use std::time::{Duration, Instant};
 
 #[cfg(all(debug_assertions, not(feature = "plugin")))]
 use assert_no_alloc::AllocDisabler;
-use assert_no_alloc::assert_no_alloc;
 use audbus::{BusName, BusWriter, Directory, Lease};
 use o_aud_rx::engine::Receiver;
 use o_aud_rx::link::{LinkState, RxLink, receiver_in};
 use o_aud_rx::settings::RxSettings;
 use o_aud_rx::telemetry::{PlayState, RxTelemetry};
+use rt_check::realtime;
 
 // With the `plugin` feature, NIH-plug's `assert_process_allocs` installs this allocator.
 #[cfg(all(debug_assertions, not(feature = "plugin")))]
@@ -278,7 +278,7 @@ fn processing_does_not_allocate() {
     };
     let mut left = vec![0.0_f32; DEVICE_BLOCK];
     let mut right = vec![0.0_f32; DEVICE_BLOCK];
-    assert_no_alloc(|| {
+    realtime(|| {
         for block in 0..400 {
             // Starve the receiver now and then to exercise buffering and draining.
             if block % 100 < 90 {

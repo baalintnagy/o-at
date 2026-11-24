@@ -1,6 +1,9 @@
-//! Shared editor look and controls of O-AUD-TX and O-AUD-RX, in the style of the O-NEC editor.
+//! Shared editor look and controls of the O-AT editors, and the plugins' CLAP and VST3
+//! entry points (`export_plugin!`, with the `nih-plug` feature).
 
 pub mod control;
+#[cfg(feature = "nih-plug")]
+mod export;
 pub mod name_window;
 #[cfg(feature = "nih-plug")]
 pub mod param;

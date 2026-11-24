@@ -1,10 +1,10 @@
 [package]
 name = "o-nr"
-version = "0.6.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "O-NR (Open Noise Reduction): noise profile based denoiser for any material"
 publish = false
 
@@ -33,6 +33,5 @@ triple_buffer = "9.0"
 winresource = "0.1"
 
 [dev-dependencies]
-# Same source as NIH-plug's `assert_process_allocs`, so tests share its allocation guard.
-assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
+rt-check = { path = "../rt-check" }
 serde_json = "1"

@@ -1,10 +1,10 @@
 [package]
 name = "o-aud-tx-app"
-version = "0.6.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Standalone O-AUD-TX: sends an audio input, what an output device plays, or what an application plays, to a named audio bus"
 publish = false
 

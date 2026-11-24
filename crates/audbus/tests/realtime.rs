@@ -4,9 +4,9 @@ use std::process;
 
 #[cfg(debug_assertions)]
 use assert_no_alloc::AllocDisabler;
-use assert_no_alloc::assert_no_alloc;
 use audbus::handoff::handoff;
 use audbus::{BusName, BusReader, BusWriter, Directory};
+use rt_check::realtime;
 
 // The allocation guard only exists in debug builds.
 #[cfg(debug_assertions)]
@@ -26,7 +26,7 @@ fn audio_thread_operations_do_not_allocate() {
     let block = vec![0.5_f32; 512];
     let mut output = vec![0.0_f32; 1024];
 
-    assert_no_alloc(|| {
+    realtime(|| {
         writer.start_stream(48_000, 2);
         receiver.poll();
         let reader = receiver.current().expect("reader handed over");

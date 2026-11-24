@@ -26,9 +26,13 @@ code.
 | egui, baseview, RustFFT, rubato, audioadapter, biquad, serde | MIT or Apache-2.0 |
 | egui-baseview, realfft | MIT |
 | assert_no_alloc (debug allocation checks) | BSD-1-Clause |
+| rtsan-standalone (optional RealtimeSanitizer test runs on Linux; links LLVM's sanitizer runtime into test binaries only, never into distributed builds) | Apache-2.0; LLVM runtime: Apache-2.0 with LLVM exceptions |
 | triple_buffer | MPL-2.0 |
 | cpal (O-AUD-RX and O-AUD-TX applications, standalone builds), windows, windows-sys, memmap2 (Unix) | Apache-2.0, or MIT or Apache-2.0 |
 | wasapi (O-AUD-TX application's application capture) | MIT |
+| alsa, alsa-sys, x11, x11rb, x11-dl, xkbcommon-dl, xcursor, calloop, nix and rustix (Linux builds) | MIT, or MIT or Apache-2.0 |
+| libloading (Linux builds) | ISC |
+| gethostname (Linux builds) | Apache-2.0 |
 | winresource (build tool embedding icons and version information) | MIT |
 
 Some transitive dependencies offer additional permissive options (Unlicense, Zlib,

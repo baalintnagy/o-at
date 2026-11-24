@@ -1,57 +1,24 @@
-[package]
-name = "o-nec"
-version = "0.6.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
-description = "O-NEC (Open Noise and Echo Cancelation) voice cleanup audio plugin"
-publish = false
-
 [workspace]
 members = ["xtask", "crates/*"]
 exclude = ["vendor"]
+resolver = "3"
+
+# Shared by the member crates. `version` is the release version: release tags `vX.Y.Z`
+# must match it.
+[workspace.package]
+version = "0.6.1"
+edition = "2024"
+# Minimum supported Rust version, checked by CI's `msrv` job. The editors use let-chains
+# (1.88); the locked dependencies need 1.87 (rubato 5.1). The pinned toolchain that builds
+# the releases is in rust-toolchain.toml.
+rust-version = "1.88"
+authors = ["baalintnagy"]
+license = "MIT"
 
 # NIH-plug's `nih_plug` crate at the pinned revision (de42101) with a fix for the
 # standalone audio input; see vendor/README.md. Remove this once upstream has the fix.
 [patch."https://github.com/robbert-vdh/nih-plug.git"]
 nih_plug = { path = "vendor/nih_plug" }
-
-[lib]
-crate-type = ["cdylib", "lib"]
-
-[[bin]]
-name = "o-nec-standalone"
-path = "src/main.rs"
-required-features = ["standalone"]
-
-[features]
-# Standalone application for trying the plugin without a host.
-standalone = ["nih_plug/standalone"]
-
-[dependencies]
-aud-ui = { path = "crates/aud-ui", features = ["nih-plug"] }
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101", features = ["assert_process_allocs"] }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de42101" }
-nnnoiseless = { version = "0.5.2", default-features = false }
-# DeepFilterNet 0.5.6 (libDF) with the embedded DeepFilterNet3 model. Not published on
-# crates.io in this version, so it is pinned to the release tag's commit.
-deep_filter = { git = "https://github.com/Rikorose/DeepFilterNet.git", rev = "978576aa8400552a4ce9730838c635aa30db5e61", default-features = false, features = ["tract", "default-model"] }
-# Must match the ndarray version used by deep_filter.
-ndarray = "0.15"
-rtrb = "0.3"
-realfft = "3.5"
-rubato = "5.1"
-triple_buffer = "9.0"
-biquad = "0.6"
-
-[build-dependencies]
-# Embeds the icon and version information in Windows executables.
-winresource = "0.1"
-
-[dev-dependencies]
-# Same source as NIH-plug's `assert_process_allocs`, so tests share its allocation guard.
-assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
 
 # DeepFilterNet inference is far too slow unoptimized; debug builds of O-NEC itself keep
 # their assertions and allocation checks.

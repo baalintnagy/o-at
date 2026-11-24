@@ -1,0 +1,41 @@
+name: RealtimeSanitizer
+
+# Runs the real-time tests under RealtimeSanitizer (RTSan), which reports locks, blocking
+# and system calls on the audio thread, not only allocations. O-AT uses it on Linux only,
+# as RTSan does not support Windows. It is not part of the release build.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "vendor/**"
+      - "Cargo.lock"
+      - ".github/workflows/rtsan.yml"
+
+jobs:
+  rtsan:
+    runs-on: ubuntu-latest
+    env:
+      # Makes rtsan-standalone link the sanitizer runtime; without it the crate is inert.
+      RTSAN_ENABLE: "1"
+      RTSAN_OPTIONS: halt_on_error=true:print_stats_on_exit=false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup toolchain install
+      # The editors' windowing and OpenGL libraries, which NIH-plug links on Linux.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl-dev libjack-jackd2-dev libx11-xcb-dev \
+            libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rtsan
+      - name: O-NEC audio path under RTSan (debug build)
+        run: cargo test --locked -p o-nec --test realtime --features rt-check/rtsan
+      - name: Audio bus, O-AUD-TX, O-AUD-RX, O-AUD-A and O-NR under RTSan (debug build)
+        run: cargo test --locked -p audbus -p o-aud-tx -p o-aud-rx -p o-aud-a -p o-nr --features rt-check/rtsan

@@ -26,5 +26,6 @@ pub use crate::error::BusError;
 pub use crate::layout::{MAX_CHANNELS, PROTOCOL_VERSION, RING_FRAMES};
 pub use crate::name::{BusName, MAX_NAME_BYTES, NameError};
 pub use crate::ring::{
-    BusMonitor, BusReader, BusWriter, MAX_WRITE_FRAMES, Presence, SAFE_WINDOW_FRAMES, StreamFormat,
+    BusMonitor, BusReader, BusWriter, MAX_WRITE_FRAMES, Presence, SAFE_WINDOW_FRAMES,
+    SAMPLE_RATES_HZ, StreamFormat,
 };

@@ -474,11 +474,11 @@ fn resize_grip(ui: &mut Ui, rect: Rect, window: &WindowState, colors: &Colors) {
         .interact(corner, Id::new("resize-grip"), Sense::drag())
         .on_hover_cursor(CursorIcon::ResizeNwSe)
         .on_hover_text("Drag to resize");
-    if response.dragged() {
-        if let Some(pointer) = response.interact_pointer_pos() {
-            let size = pointer - rect.min + vec2(4.0, 4.0);
-            window.request((size.x.round() as u32, size.y.round() as u32));
-        }
+    if response.dragged()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let size = pointer - rect.min + vec2(4.0, 4.0);
+        window.request((size.x.round() as u32, size.y.round() as u32));
     }
     let color = if response.hovered() || response.dragged() {
         colors.accent

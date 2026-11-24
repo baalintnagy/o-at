@@ -19,12 +19,13 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
+use aud_ui::export_plugin;
 use aud_ui::theme;
 use egui::{CentralPanel, Frame};
 use nih_plug::prelude::{
     AsyncExecutor, AudioIOLayout, AuxiliaryBuffers, Buffer, BufferConfig, ClapFeature, ClapPlugin,
     Editor, InitContext, MidiConfig, Params, Plugin, PortNames, ProcessContext, ProcessStatus,
-    Vst3Plugin, Vst3SubCategory, nih_export_clap,
+    Vst3Plugin, Vst3SubCategory,
 };
 
 use crate::analysis::Analyzer;
@@ -209,12 +210,4 @@ impl Vst3Plugin for OAudA {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
-nih_export_clap!(OAudA);
-// The VST3 bindings' COM macros expand to a trailing semicolon in expression position.
-#[allow(semicolon_in_expressions_from_non_local_macros)]
-mod vst3_export {
-    use super::OAudA;
-    use nih_plug::nih_export_vst3;
-
-    nih_export_vst3!(OAudA);
-}
+export_plugin!(OAudA);

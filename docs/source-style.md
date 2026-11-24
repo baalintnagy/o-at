@@ -6,12 +6,19 @@ Run these commands from the repository root:
 cargo fmt --all
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone -- -D warnings
-cargo test --release
-cargo test --test realtime
+cargo test -p o-nec --release
+cargo test -p o-nec --test realtime
 cargo test --workspace --release
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
 cargo test -p o-aud-a
 cargo test -p o-nr
+```
+
+On Linux, the real-time tests also run under RealtimeSanitizer:
+
+```bash
+RTSAN_ENABLE=1 cargo test -p o-nec --test realtime --features rt-check/rtsan
+RTSAN_ENABLE=1 cargo test -p audbus -p o-aud-tx -p o-aud-rx -p o-aud-a -p o-nr --features rt-check/rtsan
 ```
 
 The CI workflow runs the check commands and fails on any difference or warning.
@@ -45,5 +52,8 @@ These conventions are not enforced by the configured tools:
 - Iterator adapters versus loops, following the guidance in [AGENTS.md](../AGENTS.md).
 - Real-time safety of code reachable from `Plugin::process`, `TxPort::process`,
   `InterleavedSender::send`, `Receiver::process`, `Capture::push` and O-NR's
-  `Engine::process` beyond allocations, which debug builds detect at run time.
+  `Engine::process` outside what the tests exercise. Debug builds detect allocations
+  at run time inside `rt_check::realtime`; the RealtimeSanitizer workflow
+  (`.github/workflows/rtsan.yml`) also detects locks, blocking and system calls there,
+  on Linux only.
 - Units in names or doc comments.

@@ -111,6 +111,9 @@ filled region is valid, so no initialization race exists.
 - An *epoch* sequence lock covers the stream format (rate, channels). Each stream start
   or format change moves it, and receivers resynchronize.
 - Receivers register in reader slots with heartbeats, so O-AUD-TX shows its listeners.
+- Any process can write the shared memory, so readers treat it as untrusted: positions
+  that overflow or move backwards fail the read, and formats outside 1–1 536 kHz
+  (`SAMPLE_RATES_HZ`) or 1–8 channels read as not started.
 
 Windows uses pagefile-backed named mappings in the session namespace; they vanish with
 the last handle. Unix uses files in `/dev/shm` (or the temporary directory). Region

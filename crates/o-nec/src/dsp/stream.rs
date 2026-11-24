@@ -80,7 +80,7 @@ impl StreamProcessor {
         max_buffer: usize,
         pacing: Pacing,
     ) -> Result<(), StreamError> {
-        if host_rate == 0 || host_rate % 100 != 0 {
+        if host_rate == 0 || !host_rate.is_multiple_of(100) {
             return Err(StreamError::UnsupportedRate(host_rate));
         }
         let block = (host_rate / 100) as usize;

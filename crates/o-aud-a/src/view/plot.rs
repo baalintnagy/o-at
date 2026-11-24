@@ -83,7 +83,7 @@ impl FreqAxis {
                 (0..=(self.high_hz / step) as usize)
                     .map(|index| index as f32 * step)
                     .filter(|hz| *hz >= self.low_hz)
-                    .map(|hz| (hz, (hz / step) as usize % 2 == 0))
+                    .map(|hz| (hz, ((hz / step) as usize).is_multiple_of(2)))
                     .collect()
             }
             FreqScale::Semitone => {

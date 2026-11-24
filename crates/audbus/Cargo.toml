@@ -1,10 +1,10 @@
 [package]
 name = "audbus"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Named inter-process audio buses over shared memory, for O-AUD-TX and O-AUD-RX"
 publish = false
 
@@ -24,3 +24,4 @@ memmap2 = "0.9"
 
 [dev-dependencies]
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
+rt-check = { path = "../rt-check" }
