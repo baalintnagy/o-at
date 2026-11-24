@@ -2,18 +2,18 @@
 //!
 //! Debug builds install NIH-plug's allocation-checking global allocator
 //! (`assert_process_allocs`), which aborts on any allocation inside
-//! `assert_no_alloc`. Release builds do not check, so run this test without
+//! `realtime`. Release builds do not check, so run this test without
 //! `--release`.
 
 use std::f32::consts::TAU;
 
-use assert_no_alloc::assert_no_alloc;
 use o_nec::dsp::deep_filter::Pacing;
 use o_nec::dsp::denoise::NoiseModel;
 use o_nec::dsp::engine::{Engine, EngineSettings};
 use o_nec::dsp::gate::GateTrigger;
 use o_nec::dsp::stream::StreamProcessor;
 use o_nec::telemetry::Telemetry;
+use rt_check::realtime;
 use triple_buffer::triple_buffer;
 
 #[test]
@@ -52,7 +52,13 @@ fn processing_and_reset_do_not_allocate() {
             .collect();
         let mut output = vec![0.0; length];
 
-        assert_no_alloc(|| {
+        // The first frame on a thread fills nnnoiseless's thread-local FFT plan cache, the
+        // one allocation the audio path permits (see `Denoiser::warm_up_thread`).
+        // RealtimeSanitizer reports it all the same, so it happens before the checked part.
+        processor.process(&mic[..1000], &reference[..1000], &mut output[..1000]);
+        processor.reset();
+
+        realtime(|| {
             for ((mic, reference), output) in mic
                 .chunks(333)
                 .zip(reference.chunks(333))

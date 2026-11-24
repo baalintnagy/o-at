@@ -192,10 +192,10 @@ impl OverviewLayout {
     fn apply(&mut self, mut rows: Vec<Row>) {
         rows.retain(|row| !row.modules.is_empty());
         while rows.len() > MAX_ROWS {
-            if let Some(extra) = rows.pop() {
-                if let Some(last) = rows.last_mut() {
-                    last.modules.extend(extra.modules);
-                }
+            if let Some(extra) = rows.pop()
+                && let Some(last) = rows.last_mut()
+            {
+                last.modules.extend(extra.modules);
             }
         }
         let mut heights = [1.0; MAX_ROWS];

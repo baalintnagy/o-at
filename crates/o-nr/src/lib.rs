@@ -11,10 +11,11 @@ use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use aud_ui::export_plugin;
 use nih_plug::prelude::{
     AsyncExecutor, AudioIOLayout, AuxiliaryBuffers, Buffer, BufferConfig, ClapFeature, ClapPlugin,
     Editor, InitContext, MidiConfig, Params, Plugin, PortNames, ProcessContext, ProcessStatus,
-    Vst3Plugin, Vst3SubCategory, nih_export_clap,
+    Vst3Plugin, Vst3SubCategory,
 };
 use triple_buffer::{Output, triple_buffer};
 
@@ -176,12 +177,4 @@ impl Vst3Plugin for ONr {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Restoration];
 }
 
-nih_export_clap!(ONr);
-// The VST3 bindings' COM macros expand to a trailing semicolon in expression position.
-#[allow(semicolon_in_expressions_from_non_local_macros)]
-mod vst3_export {
-    use super::ONr;
-    use nih_plug::nih_export_vst3;
-
-    nih_export_vst3!(ONr);
-}
+export_plugin!(ONr);

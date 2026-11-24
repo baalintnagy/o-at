@@ -204,14 +204,14 @@ fn run(shared: &AnalysisShared, mut consumer: Consumer<[f32; 2]>) {
         }
 
         let available = consumer.slots();
-        if available > 0 {
-            if let Ok(chunk) = consumer.read_chunk(available) {
-                let (first, second) = chunk.as_slices();
-                for frame in first.iter().chain(second) {
-                    engine.process(*frame, view);
-                }
-                chunk.commit_all();
+        if available > 0
+            && let Ok(chunk) = consumer.read_chunk(available)
+        {
+            let (first, second) = chunk.as_slices();
+            for frame in first.iter().chain(second) {
+                engine.process(*frame, view);
             }
+            chunk.commit_all();
         }
         let dropped = shared.stream.dropped_frames.load(Ordering::Relaxed);
         let mut published = shared

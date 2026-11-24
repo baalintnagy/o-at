@@ -266,10 +266,12 @@ impl Worker {
             self.disconnect();
             return LinkState::NoBus;
         };
-        if self.active.is_none() && device_rate > 0 && directory.find(&name).is_some() {
-            if let Err(error) = self.connect(&directory, name, device_rate) {
-                return LinkState::Error(error);
-            }
+        if self.active.is_none()
+            && device_rate > 0
+            && directory.find(&name).is_some()
+            && let Err(error) = self.connect(&directory, name, device_rate)
+        {
+            return LinkState::Error(error);
         }
         match &mut self.active {
             Some(active) => {

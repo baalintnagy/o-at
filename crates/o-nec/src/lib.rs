@@ -11,11 +11,12 @@ use std::num::NonZeroU32;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
+use aud_ui::export_plugin;
 use nih_plug::prelude::{AsyncExecutor, Params};
 use nih_plug::prelude::{
     AudioIOLayout, AuxiliaryBuffers, Buffer, BufferConfig, ClapFeature, ClapPlugin, Editor,
     InitContext, MidiConfig, Plugin, PortNames, ProcessContext, ProcessMode, ProcessStatus,
-    Vst3Plugin, Vst3SubCategory, nih_export_clap, nih_log,
+    Vst3Plugin, Vst3SubCategory, new_nonzero_u32, nih_log,
 };
 use triple_buffer::{Output, triple_buffer};
 
@@ -103,7 +104,7 @@ impl Plugin for ONec {
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(2),
             main_output_channels: NonZeroU32::new(2),
-            aux_input_ports: &[NonZeroU32::new(2).unwrap()],
+            aux_input_ports: &[new_nonzero_u32(2)],
             names: PortNames {
                 layout: Some("Stereo"),
                 main_input: Some("Microphone"),
@@ -116,7 +117,7 @@ impl Plugin for ONec {
         AudioIOLayout {
             main_input_channels: NonZeroU32::new(1),
             main_output_channels: NonZeroU32::new(1),
-            aux_input_ports: &[NonZeroU32::new(1).unwrap()],
+            aux_input_ports: &[new_nonzero_u32(1)],
             names: PortNames {
                 layout: Some("Mono"),
                 main_input: Some("Microphone"),
@@ -286,12 +287,4 @@ impl Vst3Plugin for ONec {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Restoration];
 }
 
-nih_export_clap!(ONec);
-// The VST3 bindings' COM macros expand to a trailing semicolon in expression position.
-#[allow(semicolon_in_expressions_from_non_local_macros)]
-mod vst3_export {
-    use super::ONec;
-    use nih_plug::nih_export_vst3;
-
-    nih_export_vst3!(ONec);
-}
+export_plugin!(ONec);

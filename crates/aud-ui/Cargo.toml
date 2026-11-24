@@ -1,10 +1,10 @@
 [package]
 name = "aud-ui"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["baalintnagy"]
-license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Shared egui theme and controls of the O-AUD-TX and O-AUD-RX editors"
 publish = false
 

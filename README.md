@@ -1,6 +1,8 @@
 # O-AT
 
-**Open Audio Tools**: open source audio plugins and applications written in Rust.
+**Open Audio Tools**: open source audio plugins and applications written in Rust, for
+Windows and Linux (x64). Releases and the [project site](https://baalintnagy.github.io/o-at/)
+offer both.
 
 | Tool | Purpose |
 | --- | --- |
@@ -123,7 +125,8 @@ written to both outputs.
 
 ### Build
 
-Requires Rust 1.85 or later (edition 2024). On Windows, use the MSVC toolchain.
+Requires Rust 1.88 or later; `rust-toolchain.toml` pins the toolchain that CI and the
+releases use, which rustup installs on first build. On Windows, use the MSVC toolchain.
 
 ```bash
 cargo xtask bundle o-nec --release
@@ -131,26 +134,41 @@ cargo xtask bundle o-nec --release
 
 Bundles are written to `target/bundled/O-NEC.vst3` and `target/bundled/O-NEC.clap`.
 Copy the VST3 bundle to your VST3 folder, for example
-`C:\Program Files\Common Files\VST3` on Windows.
+`C:\Program Files\Common Files\VST3` on Windows or `~/.vst3` on Linux, and the CLAP file
+to `C:\Program Files\Common Files\CLAP` or `~/.clap`.
 
 To try the plugin without a host:
 
 ```bash
-cargo run --release --features standalone --bin o-nec-standalone -- --help
+cargo run --release -p o-nec --features standalone --bin o-nec-standalone -- --help
 ```
 
-On Linux, building the editor needs X11, XCB and OpenGL development packages.
+On Linux, building the editor needs X11, XCB and OpenGL development packages; on Debian
+and Ubuntu:
+
+```bash
+sudo apt-get install build-essential pkg-config cmake libasound2-dev libgl-dev   libjack-jackd2-dev libx11-xcb-dev libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev   libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev
+```
 
 ### Verify
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features o-nec/standalone,o-aud-a/standalone,o-nr/standalone -- -D warnings
-cargo test --release
-cargo test --test realtime
+cargo test -p o-nec --release
+cargo test -p o-nec --test realtime
 cargo test -p audbus -p o-aud-tx -p o-aud-rx
 cargo test -p o-aud-a
 cargo test -p o-nr
+```
+
+On Linux, the real-time tests also run under
+[RealtimeSanitizer](https://clang.llvm.org/docs/RealtimeSanitizer.html), which reports
+locks, blocking and system calls on the audio thread as well as allocations:
+
+```bash
+RTSAN_ENABLE=1 cargo test -p o-nec --test realtime --features rt-check/rtsan
+RTSAN_ENABLE=1 cargo test -p audbus -p o-aud-tx -p o-aud-rx -p o-aud-a -p o-nr --features rt-check/rtsan
 ```
 
 The tests cover echo canceller convergence (over 25 dB ERLE) and near-end
@@ -158,10 +176,11 @@ preservation during double talk, residual echo suppression, latency alignment an
 reduction of both noise models, the RNNoise fallback for missing DeepFilterNet frames, gate timing and hysteresis, analyzer calibration, reported versus
 measured latency at several host rates and buffer sizes for both models, and the
 complete chain at 44.1 kHz with both models. The `realtime` test runs the chain with both
-models, editor analysis and reset under NIH-plug's allocation guard; it only checks in
-debug builds. A performance test requires the full chain with a 500 ms tail to run at
-least 20 times (RNNoise) or 5 times (DeepFilterNet) faster than real time in release
-builds.
+models, editor analysis and reset inside `rt_check::realtime`, which aborts on
+allocations in debug builds and, under RealtimeSanitizer, on any real-time unsafe call. A
+performance test requires the full chain with a 500 ms tail to run at least 8 times
+(RNNoise) or 3 times (DeepFilterNet) faster than real time in release builds; a desktop
+measures about 35 and 30 times.
 
 The VST3 bundle passes [pluginval](https://github.com/Tracktion/pluginval) 1.0.4 at
 strictness level 10, both as a release build and as a debug build with allocation
@@ -227,7 +246,8 @@ headphones on another interface.
 - The standalone **O-AUD-TX** application sends any number of routes, each to its own
   bus: an input device, everything an output device plays (Windows loopback), or what a
   single application plays (Windows process loopback). It uses the same transmitter core
-  and editor as the plugin.
+  and editor as the plugin. On Linux it sends input devices; to send what a device plays,
+  choose its PipeWire or PulseAudio monitor as the input.
 
 | O-AUD-TX | O-AUD-RX application |
 | --- | --- |
@@ -505,12 +525,21 @@ Speex (Valin, 2007) and is implemented here on top of realfft.
 
 ## Releases
 
-Pushing a tag `vX.Y.Z` that matches the version in `Cargo.toml` runs the
+Pushing a tag `vX.Y.Z` that matches the workspace version in the root `Cargo.toml` runs the
 [release workflow](.github/workflows/release.yml): it runs every CI check, builds the
-VST3 and CLAP bundles and the five applications, and publishes a GitHub release with
-`O-AT-X.Y.Z-windows-x64.zip` (installation notes in
-[INSTALL.txt](packaging/INSTALL.txt)) and its SHA-256 checksum. The workflow can also be
+VST3 and CLAP bundles and the five applications for Windows and Linux, and publishes a
+GitHub release with `O-AT-X.Y.Z-windows-x64.zip` and `O-AT-X.Y.Z-linux-x64.tar.gz`
+(installation notes in [INSTALL.txt](packaging/INSTALL.txt) and
+[INSTALL-linux.txt](packaging/INSTALL-linux.txt)) and their SHA-256 checksums. The Linux
+build is made on Ubuntu 22.04 and needs glibc 2.35 or later. The workflow can also be
 started by hand with a version.
+
+[CI](.github/workflows/ci.yml) runs on every push to `main` and every pull request: the
+Windows checks and bundles, a build with the minimum supported Rust (`rust-version` in
+`Cargo.toml`, currently 1.88) and the audio bus tests on Linux. The
+[RealtimeSanitizer workflow](.github/workflows/rtsan.yml) runs nightly and on pull
+requests that change the code. The [project site](https://baalintnagy.github.io/o-at/) is
+built from this README and `docs/` by the [Pages workflow](.github/workflows/pages.yml).
 
 The executables embed their icons and version information. The icons are generated
 from vector shapes; regenerate them after changing [the generator](tools/icons/generate.py)

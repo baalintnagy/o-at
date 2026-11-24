@@ -295,15 +295,16 @@ impl Worker {
                 self.release();
             }
         }
-        if self.owned.is_none() && self.retiring.is_none() {
-            if let Err(error) = self.claim(&directory, &name) {
-                return match error {
-                    BusError::NameTaken => TxState::Taken {
-                        suggestion: directory.free_variant(&name).to_string(),
-                    },
-                    error => TxState::Error(error),
-                };
-            }
+        if self.owned.is_none()
+            && self.retiring.is_none()
+            && let Err(error) = self.claim(&directory, &name)
+        {
+            return match error {
+                BusError::NameTaken => TxState::Taken {
+                    suggestion: directory.free_variant(&name).to_string(),
+                },
+                error => TxState::Error(error),
+            };
         }
         let Some(owned) = &mut self.owned else {
             return TxState::Inactive;
@@ -344,13 +345,14 @@ impl Worker {
     /// Withdraws the writer from the audio thread; the lease is kept until it is no
     /// longer in use, so no other transmitter writes to the same bus meanwhile.
     fn release(&mut self) {
-        if self.owned.is_some() && self.sender.send(None).is_ok() {
-            if let Some(owned) = self.owned.take() {
-                self.retiring = Some(Retiring {
-                    _lease: owned.lease,
-                    since: Instant::now(),
-                });
-            }
+        if self.owned.is_some()
+            && self.sender.send(None).is_ok()
+            && let Some(owned) = self.owned.take()
+        {
+            self.retiring = Some(Retiring {
+                _lease: owned.lease,
+                since: Instant::now(),
+            });
         }
     }
 

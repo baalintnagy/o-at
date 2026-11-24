@@ -53,22 +53,41 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     env:
-      PACKAGE: O-AT-${{ needs.version.outputs.version }}-windows-x64
+      WINDOWS: O-AT-${{ needs.version.outputs.version }}-windows-x64
+      LINUX: O-AT-${{ needs.version.outputs.version }}-linux-x64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: o-at-windows-x64
-          path: bundled
-      - name: Assemble the package
+          path: windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: o-at-linux-x64
+          path: linux-archive
+      - name: Assemble the Windows package
         run: |
-          mkdir -p "$PACKAGE/VST3" "$PACKAGE/CLAP"
-          cp -r bundled/*.vst3 "$PACKAGE/VST3/"
-          cp bundled/*.clap "$PACKAGE/CLAP/"
-          cp bundled/*.exe "$PACKAGE/"
-          cp packaging/INSTALL.txt README.md LICENSE NOTICE.md "$PACKAGE/"
-          zip -r -9 "$PACKAGE.zip" "$PACKAGE"
-          sha256sum "$PACKAGE.zip" > SHA256SUMS.txt
+          mkdir -p "$WINDOWS/VST3" "$WINDOWS/CLAP"
+          cp -r windows/*.vst3 "$WINDOWS/VST3/"
+          cp windows/*.clap "$WINDOWS/CLAP/"
+          cp windows/*.exe "$WINDOWS/"
+          cp packaging/INSTALL.txt README.md LICENSE NOTICE.md "$WINDOWS/"
+          zip -r -9 "$WINDOWS.zip" "$WINDOWS"
+      - name: Assemble the Linux package
+        run: |
+          mkdir -p linux "$LINUX/VST3" "$LINUX/CLAP"
+          tar -C linux -xf linux-archive/o-at-linux-x64.tar
+          cp -r linux/*.vst3 "$LINUX/VST3/"
+          cp linux/*.clap "$LINUX/CLAP/"
+          for app in O-AUD-RX O-AUD-TX O-AUD-A-standalone O-NEC-standalone O-NR-standalone; do
+            install -m 755 "linux/$app" "$LINUX/$app"
+          done
+          cp packaging/INSTALL-linux.txt "$LINUX/INSTALL.txt"
+          cp README.md LICENSE NOTICE.md "$LINUX/"
+          tar -czf "$LINUX.tar.gz" "$LINUX"
+      - name: Checksums
+        run: |
+          sha256sum "$WINDOWS.zip" "$LINUX.tar.gz" > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
@@ -78,13 +97,14 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           generate_release_notes: true
           body: |
-            Windows x64 builds of O-NEC, O-NR, O-AUD-TX, O-AUD-RX and O-AUD-A (VST3 and
-            CLAP) and the standalone O-AUD-RX, O-AUD-TX, O-AUD-A, O-NEC and O-NR
-            applications. See
-            INSTALL.txt in the archive.
+            Windows x64 and Linux x64 builds of O-NEC, O-NR, O-AUD-TX, O-AUD-RX and
+            O-AUD-A (VST3 and CLAP) and the standalone O-AUD-RX, O-AUD-TX, O-AUD-A, O-NEC
+            and O-NR applications. See INSTALL.txt in each archive. The Linux build needs
+            glibc 2.35 or later (Ubuntu 22.04, Debian 12).
 
             Distributed VST3 binaries include GPLv3-licensed VST3 bindings; see NOTICE.md.
           files: |
-            ${{ env.PACKAGE }}.zip
+            ${{ env.WINDOWS }}.zip
+            ${{ env.LINUX }}.tar.gz
             SHA256SUMS.txt
           fail_on_unmatched_files: true

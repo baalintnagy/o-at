@@ -4,7 +4,7 @@ use std::env;
 
 use winresource::WindowsResource;
 
-const ICON: &str = "assets/icons/o-nec.ico";
+const ICON: &str = "../../assets/icons/o-nec.ico";
 
 fn main() {
     println!("cargo:rerun-if-changed={ICON}");

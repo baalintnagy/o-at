@@ -195,11 +195,16 @@ impl Controller {
             .input_devices()
             .map(|devices| devices.filter_map(|device| device.name().ok()).collect())
             .unwrap_or_default();
-        let outputs: Vec<String> = self
-            .host
-            .output_devices()
-            .map(|devices| devices.filter_map(|device| device.name().ok()).collect())
-            .unwrap_or_default();
+        // Capturing what an output plays needs WASAPI loopback; elsewhere outputs are not
+        // sources.
+        let outputs: Vec<String> = if cfg!(windows) {
+            self.host
+                .output_devices()
+                .map(|devices| devices.filter_map(|device| device.name().ok()).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         self.update_status(|status| {
             status.inputs = inputs;
             status.outputs = outputs;
@@ -400,7 +405,8 @@ pub struct Feed {
     block_frames: Arc<AtomicU32>,
     /// Device channels, at least one.
     channels: usize,
-    /// Stream rate in Hz.
+    /// Stream rate in Hz, for application capture's silence (Windows only).
+    #[cfg(windows)]
     sample_rate: u32,
 }
 
@@ -421,11 +427,13 @@ impl Feed {
             settings,
             block_frames,
             channels: channels.max(1),
+            #[cfg(windows)]
             sample_rate,
         }
     }
 
     /// Stream rate in Hz.
+    #[cfg(windows)]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
@@ -446,7 +454,9 @@ impl Feed {
         self.sender.send(data, self.settings.gain(), to_f32);
     }
 
-    /// Sends `frames` frames of silence. Real-time safe.
+    /// Sends `frames` frames of silence. Real-time safe. Only application capture
+    /// (Windows) sends silence.
+    #[cfg(windows)]
     pub fn push_silence(&mut self, frames: u64) {
         self.sender.send_silence(frames, self.settings.gain());
     }

@@ -7,12 +7,12 @@ use std::time::{Duration, Instant};
 
 #[cfg(all(debug_assertions, not(feature = "plugin")))]
 use assert_no_alloc::AllocDisabler;
-use assert_no_alloc::assert_no_alloc;
 use audbus::{BusName, BusReader, Directory};
 use o_aud_tx::interleaved::{InterleavedSender, MAX_BLOCK_FRAMES};
 use o_aud_tx::link::{TxLink, TxState, transmitter_in};
 use o_aud_tx::port::TxPort;
 use o_aud_tx::telemetry::TxTelemetry;
+use rt_check::realtime;
 
 // With the `plugin` feature, NIH-plug's `assert_process_allocs` installs this allocator.
 #[cfg(all(debug_assertions, not(feature = "plugin")))]
@@ -132,7 +132,7 @@ fn sending_does_not_allocate() {
     let block = vec![0.25_f32; 512];
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
-        assert_no_alloc(|| {
+        realtime(|| {
             for _ in 0..16 {
                 port.process(&[&block, &block], 0.9);
             }
@@ -206,7 +206,7 @@ fn replaced_ports_reclaim_the_bus_without_allocating() {
     let block = vec![1_000_i16; 2 * 441];
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
-        assert_no_alloc(|| {
+        realtime(|| {
             for _ in 0..16 {
                 sender.send(&block, 0.5, |sample| f32::from(sample) / 32_768.0);
             }
@@ -236,7 +236,7 @@ fn silence_reaches_the_bus_without_allocating() {
     // More than one block, so the silence is split.
     let frames = 2 * MAX_BLOCK_FRAMES + 7;
     let position = reader.write_position();
-    assert_no_alloc(|| sender.send_silence(frames as u64, 1.0));
+    realtime(|| sender.send_silence(frames as u64, 1.0));
     assert_eq!(reader.write_position() - position, frames as u64);
     let format = reader.format().expect("stream started");
     let mut output = vec![1.0; 2 * frames];
@@ -279,7 +279,7 @@ fn several_transmitters_in_one_process_keep_their_buses() {
         }
     }
     let positions: Vec<u64> = readers.iter().map(BusReader::write_position).collect();
-    assert_no_alloc(|| {
+    realtime(|| {
         for ((_, sender), block) in routes.iter_mut().zip(&blocks) {
             sender.send(block, 1.0, |sample| sample);
         }

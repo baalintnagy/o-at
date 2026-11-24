@@ -9,6 +9,10 @@
 //!
 //! The worker loads the model when it receives its first frame, so instances that never
 //! use DeepFilterNet do not pay for it.
+//!
+//! In real time the audio thread never wakes the worker, as that is a system call: the
+//! worker polls its queue every [`POLL_WAIT`] while frames arrive and every [`IDLE_WAIT`]
+//! otherwise. Offline rendering wakes it for each frame instead.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +32,14 @@ pub const MODEL_DELAY: usize = 3 * FRAME;
 /// Frames that can wait for the worker before new frames are dropped.
 const QUEUE_FRAMES: usize = 64;
 
-/// How long the worker sleeps between checks when no frame wakes it.
+/// How long the worker sleeps between checks of its queue while frames arrive. It adds at
+/// most this much to a frame's processing time, well within the pipeline's slack.
+const POLL_WAIT: Duration = Duration::from_millis(1);
+
+/// How long after the last frame the worker keeps polling every [`POLL_WAIT`].
+const ACTIVE_SPAN: Duration = Duration::from_millis(100);
+
+/// How long the worker sleeps between checks of its queue when no frames arrive.
 const IDLE_WAIT: Duration = Duration::from_millis(20);
 
 /// Longest wait for a result when processing offline, which covers loading the model.
@@ -148,7 +159,8 @@ impl DeepFilter {
         samples.copy_from_slice(input);
         // A full queue means the worker stalled; the frame is dropped and the worker
         // restarts the model on the sequence gap.
-        if self.jobs.push(Job { sequence, samples }).is_ok() {
+        // In real time the worker polls; waking it would be a system call.
+        if self.jobs.push(Job { sequence, samples }).is_ok() && self.pacing == Pacing::Offline {
             self.worker_thread.unpark();
         }
 
@@ -212,12 +224,15 @@ fn run_worker(mut jobs: Consumer<Job>, mut results: Producer<Job>, shared: &Shar
     let mut noisy = Array2::<f32>::zeros((1, FRAME));
     let mut enhanced = Array2::<f32>::zeros((1, FRAME));
     let mut dither = Dither(0x2545_f491);
+    let mut last_job: Option<Instant> = None;
 
     while !shared.stop.load(Ordering::Acquire) {
         let Ok(mut job) = jobs.pop() else {
-            thread::park_timeout(IDLE_WAIT);
+            let active = last_job.is_some_and(|last| last.elapsed() < ACTIVE_SPAN);
+            thread::park_timeout(if active { POLL_WAIT } else { IDLE_WAIT });
             continue;
         };
+        last_job = Some(Instant::now());
         if model.is_none() && !shared.failed.load(Ordering::Acquire) {
             model = load_model();
             match model {

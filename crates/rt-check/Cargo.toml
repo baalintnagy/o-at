@@ -1,0 +1,21 @@
+[package]
+name = "rt-check"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Test helper that runs code under the real-time checks of the audio thread"
+publish = false
+
+[features]
+# Also run under RealtimeSanitizer, which reports locks, blocking and system calls, not
+# only allocations. Linux only; build with `RTSAN_ENABLE=1` set.
+rtsan = ["dep:rtsan-standalone"]
+
+[dependencies]
+# Same source as NIH-plug's `assert_process_allocs`, so tests share its allocation guard.
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid", features = ["backtrace", "log"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rtsan-standalone = { version = "0.3", optional = true }

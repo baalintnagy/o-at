@@ -268,6 +268,7 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "memmap2 0.9.12",
+ "rt-check",
  "rtrb 0.3.6",
  "windows-sys 0.59.0",
 ]
@@ -1151,6 +1152,12 @@ name = "error-code"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
+
+[[package]]
+name = "fastrand"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "filetime"
@@ -2099,6 +2106,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi 0.5.3",
+ "libc",
+]
+
+[[package]]
 name = "num_enum"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2131,9 +2148,8 @@ dependencies = [
 
 [[package]]
 name = "o-aud-a"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
- "assert_no_alloc",
  "aud-ui",
  "audbus",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2142,6 +2158,7 @@ dependencies = [
  "nih_plug",
  "raw-window-handle 0.5.2",
  "realfft",
+ "rt-check",
  "rtrb 0.3.6",
  "serde",
  "serde_json",
@@ -2151,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2159,12 +2176,13 @@ dependencies = [
  "egui",
  "nih_plug",
  "nih_plug_egui",
+ "rt-check",
  "rubato 5.1.0",
 ]
 
 [[package]]
 name = "o-aud-rx-app"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2178,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-tx"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2187,12 +2205,13 @@ dependencies = [
  "egui",
  "nih_plug",
  "nih_plug_egui",
+ "rt-check",
  "winresource",
 ]
 
 [[package]]
 name = "o-aud-tx-app"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2207,9 +2226,8 @@ dependencies = [
 
 [[package]]
 name = "o-nec"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
- "assert_no_alloc",
  "aud-ui",
  "biquad",
  "deep_filter",
@@ -2218,6 +2236,7 @@ dependencies = [
  "nih_plug_egui",
  "nnnoiseless",
  "realfft",
+ "rt-check",
  "rtrb 0.3.6",
  "rubato 5.1.0",
  "triple_buffer",
@@ -2226,13 +2245,13 @@ dependencies = [
 
 [[package]]
 name = "o-nr"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
- "assert_no_alloc",
  "aud-ui",
  "nih_plug",
  "nih_plug_egui",
  "realfft",
+ "rt-check",
  "serde",
  "serde_json",
  "triple_buffer",
@@ -2903,6 +2922,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rt-check"
+version = "0.1.0"
+dependencies = [
+ "assert_no_alloc",
+ "rtsan-standalone",
+]
+
+[[package]]
 name = "rtrb"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2916,6 +2943,36 @@ name = "rtrb"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "342e1478a6e1c839e7405033eabfdc954d4d5dabd39f34e83420a43a95acfb04"
+
+[[package]]
+name = "rtsan-standalone"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fd1b6d61d69481a68e555916d3a52213846f5c2d2140bdc74ebc308e2338fc3"
+dependencies = [
+ "rtsan-standalone-macros",
+ "rtsan-standalone-sys",
+]
+
+[[package]]
+name = "rtsan-standalone-macros"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8320af894782374141c8e0d4521ee613a8f24d7ab08b6ad359881311e37b9ef"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "rtsan-standalone-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "362a9c531f731e574a870cdb28ee7d81178ba7a87ed54380eb9b8d8f0c3b5301"
+dependencies = [
+ "num_cpus",
+ "tempfile",
+]
 
 [[package]]
 name = "rubato"
@@ -3285,6 +3342,19 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix 1.1.6",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

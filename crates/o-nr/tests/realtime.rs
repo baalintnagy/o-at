@@ -1,15 +1,15 @@
 //! Real-time safety: the audio path must not allocate.
 //!
 //! Debug builds install NIH-plug's allocation-checking global allocator
-//! (`assert_process_allocs`), which aborts on any allocation inside `assert_no_alloc`.
+//! (`assert_process_allocs`), which aborts on any allocation inside `realtime`.
 //! Release builds do not check, so run this test without `--release`.
 
 use std::f32::consts::TAU;
 
-use assert_no_alloc::assert_no_alloc;
 use o_nr::dsp::engine::{Engine, NoiseMode, Resolution, Settings};
 use o_nr::dsp::profile::{ProfileData, ProfileStore};
 use o_nr::telemetry::Telemetry;
+use rt_check::realtime;
 use triple_buffer::triple_buffer;
 
 const BLOCK: usize = 333;
@@ -73,7 +73,7 @@ fn processing_learning_and_switching_do_not_allocate() {
             ..Settings::default()
         };
 
-        assert_no_alloc(|| {
+        realtime(|| {
             for settings in &cases {
                 process(&mut engine, &mut left, &mut right, settings);
             }

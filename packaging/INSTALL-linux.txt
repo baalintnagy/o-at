@@ -1,0 +1,91 @@
+O-NEC, O-NR, O-AUD-TX, O-AUD-RX and O-AUD-A for Linux (x64)
+============================================================
+
+Contents
+--------
+VST3/O-NEC.vst3, O-NR.vst3, O-AUD-TX.vst3, O-AUD-RX.vst3, O-AUD-A.vst3   VST3 plugins
+CLAP/O-NEC.clap, O-NR.clap, O-AUD-TX.clap, O-AUD-RX.clap, O-AUD-A.clap    CLAP plugins
+O-AUD-RX                        Plays a bus on any output device
+O-AUD-TX                        Sends input devices to buses
+O-AUD-A-standalone              Analyzes an audio input device
+O-NEC-standalone                O-NEC without a plugin host
+O-NR-standalone                 O-NR without a plugin host
+
+Requirements
+------------
+x86-64 Linux with glibc 2.35 or later (Ubuntu 22.04, Debian 12 or newer), an X11 or
+XWayland session, and the X11, OpenGL and ALSA libraries that desktop distributions
+install: libx11-xcb1, libxcb1, libgl1 and libasound2.
+
+Install the plugins
+-------------------
+1. Copy the folders in VST3 to ~/.vst3 and the files in CLAP to ~/.clap (for every user:
+   /usr/lib/vst3 and /usr/lib/clap, with root rights):
+
+       mkdir -p ~/.vst3 ~/.clap
+       cp -r VST3/*.vst3 ~/.vst3/
+       cp CLAP/*.clap ~/.clap/
+
+2. Rescan plugins in your host. They are listed under the vendor "o-at".
+
+The applications need no installation; run them from any folder, for example
+./O-AUD-RX. The standalone plugins choose JACK when a JACK (or PipeWire JACK) server is
+running and ALSA otherwise; pick one with --backend jack or --backend alsa (see --help).
+
+Route audio between hosts and devices
+-------------------------------------
+1. Insert O-AUD-TX where audio should leave a host. It names its bus Bus 1, Bus 2 and
+   so on; type another name, or click EDIT if the host keeps your keystrokes.
+2. Play the bus with the O-AUD-RX plugin in any host, or with O-AUD-RX on any output
+   device: pick the bus from the list or enter its name.
+3. Raise Latency in O-AUD-RX if its Dropouts counter keeps rising.
+
+Senders and receivers must run on the same computer as the same user. Buses live in
+/dev/shm.
+
+O-AUD-RX remembers its bus, device and settings in ~/.config/O-AUD-RX/settings.ini and
+accepts --bus NAME and --device NAME.
+
+O-AUD-TX sends routes, each from an input device to its own bus. + ADD and REMOVE under
+ROUTES add and stop routes; pick the selected route's input under AUDIO SOURCE. Capturing
+what an output device or a single application plays needs Windows; on Linux, send what
+a device plays by choosing its PipeWire or PulseAudio monitor as the input (for example
+with pavucontrol). It remembers its routes in ~/.config/O-AUD-TX/settings.ini and
+accepts --bus NAME and --input NAME ("default" selects the system default device); repeat
+them for more routes, for example --bus Voice --input default.
+
+Remove noise
+------------
+Insert O-NR on any track. Play a passage where only the noise is heard, press LEARN,
+then press STOP LEARNING: that spectrum becomes the noise profile, stored with the
+session. Raise Reduction for more attenuation and Threshold to treat more as noise;
+LISTEN REMOVED plays what is taken away. Without a profile, or with Adaptive, O-NR
+tracks steady noise under the signal by itself. Higher Resolution separates hum and
+other steady tones better but adds delay, which hosts compensate.
+
+Analyze audio
+-------------
+Insert O-AUD-A anywhere in a chain; it passes the audio through unchanged. Its pages
+show a spectrum analyzer, a sonogram, a stereo imager, an oscilloscope, an EBU R 128
+loudness meter with target presets and a PLATFORMS table of what streaming platforms'
+normalization does to the track, and 3D spectrum and stereo views; SPECTRAL overlays the
+waveform on the sonogram. OVERVIEW shows the views you switch on: drag a view's title to
+move it and the gaps between views to resize them. Click the button at the right of a
+view's header, or right-click the diagram, for its SETTINGS and COLORS; THEME colors the
+controls. Drag the window's lower right corner to resize it; FULL SCREEN needs Windows.
+
+SOURCES adds buses from O-AUD-TX next to the input, each in its own color, with its
+loudness in the panel. Every view picks its signals under SIGNALS at the top of its
+settings. MATCH LEVEL compares spectrum curves at equal loudness, MASKING shades the
+frequencies where two curves are about equally loud.
+
+O-AUD-A-standalone analyzes an input device and plays nothing back (see --help for
+backends, devices and rates).
+
+Linux builds are tested with the automated tests and loaded by hand, not yet in many
+hosts; please report problems at https://github.com/baalintnagy/o-at/issues.
+
+Licenses
+--------
+The source code is MIT licensed (LICENSE). The VST3 plugins and the NIH-plug
+standalone applications include GPLv3-licensed VST3 bindings; see NOTICE.md.
