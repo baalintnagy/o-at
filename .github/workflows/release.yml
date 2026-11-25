@@ -104,11 +104,12 @@ jobs:
           cp windows/*.clap "$WINDOWS/CLAP/"
           cp windows/*.exe "$WINDOWS/"
           cp packaging/INSTALL.txt README.md LICENSE NOTICE.md "$WINDOWS/"
+          cp packaging/install.ps1 packaging/install.cmd packaging/uninstall.cmd "$WINDOWS/"
           zip -r -9 "$WINDOWS.zip" "$WINDOWS"
       - name: Assemble the Linux package
         if: needs.version.outputs.linux == 'true'
         run: |
-          mkdir -p linux "$LINUX/VST3" "$LINUX/CLAP"
+          mkdir -p linux "$LINUX/VST3" "$LINUX/CLAP" "$LINUX/icons"
           tar -C linux -xf linux-archive/o-at-linux-x64.tar
           cp -r linux/*.vst3 "$LINUX/VST3/"
           cp linux/*.clap "$LINUX/CLAP/"
@@ -116,6 +117,8 @@ jobs:
             install -m 755 "linux/$app" "$LINUX/$app"
           done
           cp packaging/INSTALL-linux.txt "$LINUX/INSTALL.txt"
+          install -m 755 packaging/install.sh "$LINUX/install.sh"
+          cp assets/icons/*.png "$LINUX/icons/"
           cp README.md LICENSE NOTICE.md "$LINUX/"
           tar -czf "$LINUX.tar.gz" "$LINUX"
       - name: Checksums and release notes

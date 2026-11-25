@@ -282,11 +282,13 @@ footer a { color: var(--dim); }
       <div class="step"><h3>Download</h3><p>Get <code>O-AT-X.Y.Z-windows-x64.zip</code> from the
         <a href="https://github.com/baalintnagy/o-at/releases/latest">latest release</a> and
         unpack it.</p></div>
-      <div class="step"><h3>Copy the plugins</h3><p>Copy the folders in <code>VST3</code> to
-        <code>C:\Program Files\Common Files\VST3</code> and the files in <code>CLAP</code> to
-        <code>…\Common Files\CLAP</code> (administrator rights needed).</p></div>
+      <div class="step"><h3>Run install.cmd</h3><p>It copies the plugins to
+        <code>C:\Program Files\Common Files\VST3</code> and <code>…\CLAP</code> (Windows
+        asks for administrator rights for this step) and the applications to your user's
+        programs, with Start Menu shortcuts. <code>uninstall.cmd</code> removes it all.</p></div>
       <div class="step"><h3>Rescan</h3><p>Rescan plugins in your host; they are listed under
-        the vendor <code>o-at</code>. The applications run from any folder.</p></div>
+        the vendor <code>o-at</code>. To update, run <code>install.cmd</code> from a newer
+        release.</p></div>
     </div>
     <h3 class="platform">Linux</h3>
     <div class="steps">
@@ -295,13 +297,14 @@ footer a { color: var(--dim); }
         (some releases are Windows-only) and
         unpack it. It needs glibc 2.35 or later (Ubuntu 22.04, Debian 12) and X11 or
         XWayland.</p></div>
-      <div class="step"><h3>Copy the plugins</h3><p>Into your home folder, no root
-        needed:</p>
-        <pre><code>mkdir -p ~/.vst3 ~/.clap
-cp -r VST3/*.vst3 ~/.vst3/
-cp CLAP/*.clap ~/.clap/</code></pre></div>
-      <div class="step"><h3>Rescan</h3><p>Rescan plugins in your host. The applications run
-        from the unpacked folder; O-AUD-TX sends input devices on Linux.</p></div>
+      <div class="step"><h3>Run install.sh</h3><p>For your user, no root needed: plugins
+        to <code>~/.vst3</code> and <code>~/.clap</code>, applications with menu entries and
+        commands in <code>~/.local/bin</code>.</p>
+        <pre><code>./install.sh
+sudo ./install.sh --system   # every user
+./install.sh --uninstall</code></pre></div>
+      <div class="step"><h3>Rescan</h3><p>Rescan plugins in your host. On Linux, O-AUD-TX
+        sends input devices; choose a PipeWire or PulseAudio monitor to send playback.</p></div>
     </div>
     <p class="more">Details in <a href="https://github.com/baalintnagy/o-at/blob/main/packaging/INSTALL.txt">INSTALL.txt</a> (Windows) and
     <a href="https://github.com/baalintnagy/o-at/blob/main/packaging/INSTALL-linux.txt">INSTALL-linux.txt</a>.

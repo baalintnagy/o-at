@@ -2148,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-a"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aud-ui",
  "audbus",
@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-rx-app"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-tx"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "assert_no_alloc",
  "aud-ui",
@@ -2211,7 +2211,7 @@ dependencies = [
 
 [[package]]
 name = "o-aud-tx-app"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aud-ui",
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=9a0b42c09d712777b2edb4c5e0cb6baf21e988f0)",
@@ -2226,7 +2226,7 @@ dependencies = [
 
 [[package]]
 name = "o-nec"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aud-ui",
  "biquad",
@@ -2245,7 +2245,7 @@ dependencies = [
 
 [[package]]
 name = "o-nr"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "aud-ui",
  "nih_plug",

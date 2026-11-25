@@ -10,6 +10,8 @@ O-AUD-TX                        Sends input devices to buses
 O-AUD-A-standalone              Analyzes an audio input device
 O-NEC-standalone                O-NEC without a plugin host
 O-NR-standalone                 O-NR without a plugin host
+install.sh                      Installs or removes everything
+icons/                          Icons for the applications' menu entries
 
 Requirements
 ------------
@@ -17,19 +19,28 @@ x86-64 Linux with glibc 2.35 or later (Ubuntu 22.04, Debian 12 or newer), an X11
 XWayland session, and the X11, OpenGL and ALSA libraries that desktop distributions
 install: libx11-xcb1, libxcb1, libgl1 and libasound2.
 
-Install the plugins
--------------------
-1. Copy the folders in VST3 to ~/.vst3 and the files in CLAP to ~/.clap (for every user:
-   /usr/lib/vst3 and /usr/lib/clap, with root rights):
+Install
+-------
+Close plugin hosts and O-AT applications, then run ./install.sh in this folder. For your
+user, without root rights, it copies:
 
-       mkdir -p ~/.vst3 ~/.clap
-       cp -r VST3/*.vst3 ~/.vst3/
-       cp CLAP/*.clap ~/.clap/
+- the VST3 and CLAP plugins to ~/.vst3 and ~/.clap,
+- the applications to ~/.local/lib/o-at, with the commands o-aud-rx, o-aud-tx, o-aud-a,
+  o-nec and o-nr in ~/.local/bin and menu entries with icons.
 
-2. Rescan plugins in your host. They are listed under the vendor "o-at".
+Then rescan plugins in your host. They are listed under the vendor "o-at". Run
+install.sh from a newer release to update.
 
-The applications need no installation; run them from any folder, for example
-./O-AUD-RX. The standalone plugins choose JACK when a JACK (or PipeWire JACK) server is
+    ./install.sh                  for your user
+    sudo ./install.sh --system    for every user: /usr/lib/vst3, /usr/lib/clap, /opt/o-at,
+                                  /usr/local/bin and /usr/local/share
+    ./install.sh --uninstall      removes it again (add --system for a system-wide one)
+    ./install.sh --skip-plugins   only the applications; --skip-apps only the plugins
+
+To install by hand instead, copy the folders in VST3 to ~/.vst3 and the files in CLAP to
+~/.clap; the applications run from any folder, for example ./O-AUD-RX.
+
+The standalone plugins choose JACK when a JACK (or PipeWire JACK) server is
 running and ALSA otherwise; pick one with --backend jack or --backend alsa (see --help).
 
 Route audio between hosts and devices

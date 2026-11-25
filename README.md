@@ -530,7 +530,14 @@ Pushing a tag `vX.Y.Z` that matches the workspace version in the root `Cargo.tom
 VST3 and CLAP bundles and the five applications for Windows and Linux, and publishes a
 GitHub release with `O-AT-X.Y.Z-windows-x64.zip` and `O-AT-X.Y.Z-linux-x64.tar.gz`
 (installation notes in [INSTALL.txt](packaging/INSTALL.txt) and
-[INSTALL-linux.txt](packaging/INSTALL-linux.txt)) and their SHA-256 checksums. The Linux
+[INSTALL-linux.txt](packaging/INSTALL-linux.txt)) and their SHA-256 checksums. Each
+package has an installer that copies the plugins and applications to their standard
+places and adds Start Menu shortcuts or menu entries:
+[install.cmd](packaging/install.cmd) (running [install.ps1](packaging/install.ps1), which
+asks for administrator rights only for the plugin folders) and
+[uninstall.cmd](packaging/uninstall.cmd) on Windows, and
+[install.sh](packaging/install.sh) on Linux (for the current user, or `--system`; also
+`--uninstall`). The Linux
 build is made on Ubuntu 22.04 and needs glibc 2.35 or later.
 
 Minor releases can be Windows-only: write `windows-only` in the annotated tag's message,

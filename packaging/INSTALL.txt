@@ -10,19 +10,29 @@ O-AUD-TX.exe                    Sends an input, an output or an application to a
 O-AUD-A-standalone.exe          Analyzes an audio input device
 O-NEC-standalone.exe            O-NEC without a plugin host
 O-NR-standalone.exe             O-NR without a plugin host
+install.cmd, uninstall.cmd      Install or remove everything (they run install.ps1)
 
-Install the plugins
--------------------
-1. Copy the folders in VST3 to C:\Program Files\Common Files\VST3
-   (CLAP hosts: copy the files in CLAP to C:\Program Files\Common Files\CLAP).
-   Both locations need administrator rights.
-2. Rescan plugins in your host. They are listed under the vendor "o-at".
+Install
+-------
+Close plugin hosts and O-AT applications, then double-click install.cmd. It copies:
+
+- the VST3 and CLAP plugins to C:\Program Files\Common Files\VST3 and ...\CLAP
+  (Windows asks for administrator rights for this step only),
+- the applications to %LOCALAPPDATA%\Programs\O-AT, with Start Menu shortcuts under O-AT.
+
+Then rescan plugins in your host. They are listed under the vendor "o-at". Run
+install.cmd from a newer release to update; uninstall.cmd removes everything except the
+applications' settings. From PowerShell, install.ps1 also takes -SkipPlugins, -SkipApps
+and -Uninstall (Get-Help .\install.ps1 for details).
+
+To install by hand instead, copy the folders in VST3 to
+C:\Program Files\Common Files\VST3 and the files in CLAP to
+C:\Program Files\Common Files\CLAP (both need administrator rights); the applications
+run from any folder.
 
 O-NEC, O-AUD-TX and O-AUD-RX replace the earlier ONEC, AUD-TX and AUD-RX. They have
 new plugin IDs, so hosts list them as new plugins: replace the earlier ones in your
 sessions, then delete ONEC.vst3, AUD-TX.vst3, AUD-RX.vst3 and ONEC.clap.
-
-The applications need no installation; run them from any folder.
 
 Route audio between hosts and devices
 -------------------------------------
@@ -49,7 +59,7 @@ a bus on the output device it captures, which feeds back. It remembers its route
 ("default" selects the system default device) and --application EXE. A bus and a source
 make a route; repeat them for more routes, for example
 --bus Browser --application brave.exe --bus Voice --input default.
-O-AUD-TX.exe replaces O-AUD-TX-standalone.exe; delete the earlier file.
+O-AUD-TX.exe replaces O-AUD-TX-standalone.exe; install.cmd deletes the earlier file.
 
 Remove noise
 ------------

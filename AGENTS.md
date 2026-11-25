@@ -151,7 +151,10 @@ match the workspace version in the root `Cargo.toml`; it reuses `ci.yml` as its 
 A tag message containing `windows-only` (or the Linux input, when run by hand) skips the
 Linux build and package. Keep
 `packaging/INSTALL.txt` (Windows) and `packaging/INSTALL-linux.txt` in step with what the
-packages contain.
+packages contain, and the installers (`packaging/install.ps1` with its `.cmd` launchers, and
+`packaging/install.sh`) in step with the plugins and applications they copy. Test the
+installers with their target folder options (or a temporary `HOME`) rather than on the
+real system folders.
 
 The project site in `site/index.html` summarizes the tools and links to the README and
 `docs/` on GitHub; `site/build.sh` assembles it with the screenshots and icons, and

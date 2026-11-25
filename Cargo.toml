@@ -6,7 +6,7 @@ resolver = "3"
 # Shared by the member crates. `version` is the release version: release tags `vX.Y.Z`
 # must match it.
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 # Minimum supported Rust version, checked by CI's `msrv` job. The editors use let-chains
 # (1.88); the locked dependencies need 1.87 (rubato 5.1). The pinned toolchain that builds

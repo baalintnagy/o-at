@@ -1,3 +1,5 @@
 # Git detects binary files; repository text uses Unix endings.
 * text=auto eol=lf
 *.sh text eol=lf
+# cmd.exe needs Windows line endings.
+*.cmd text eol=crlf
