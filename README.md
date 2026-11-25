@@ -531,7 +531,17 @@ VST3 and CLAP bundles and the five applications for Windows and Linux, and publi
 GitHub release with `O-AT-X.Y.Z-windows-x64.zip` and `O-AT-X.Y.Z-linux-x64.tar.gz`
 (installation notes in [INSTALL.txt](packaging/INSTALL.txt) and
 [INSTALL-linux.txt](packaging/INSTALL-linux.txt)) and their SHA-256 checksums. The Linux
-build is made on Ubuntu 22.04 and needs glibc 2.35 or later. The workflow can also be
+build is made on Ubuntu 22.04 and needs glibc 2.35 or later.
+
+Minor releases can be Windows-only: write `windows-only` in the annotated tag's message,
+or untick **Linux** when starting the workflow by hand. CI then skips the Linux build and
+the release has only the Windows package. The project site's download buttons always link
+to the newest release that has each platform's package.
+
+```bash
+git tag -a v0.6.2 -m "v0.6.2 windows-only"
+git push origin v0.6.2
+``` The workflow can also be
 started by hand with a version.
 
 [CI](.github/workflows/ci.yml) runs on every push to `main` and every pull request: the

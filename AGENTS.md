@@ -147,7 +147,9 @@ change. Preserve third-party licenses and notices.
 # Releases and assets
 
 Releases are published by `.github/workflows/release.yml` from tags `vX.Y.Z`, which must
-match the workspace version in the root `Cargo.toml`; it reuses `ci.yml` as its build. Keep
+match the workspace version in the root `Cargo.toml`; it reuses `ci.yml` as its build.
+A tag message containing `windows-only` (or the Linux input, when run by hand) skips the
+Linux build and package. Keep
 `packaging/INSTALL.txt` (Windows) and `packaging/INSTALL-linux.txt` in step with what the
 packages contain.
 

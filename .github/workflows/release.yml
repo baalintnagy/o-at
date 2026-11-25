@@ -2,6 +2,10 @@ name: Release
 
 # Push a tag such as `v0.2.0` (matching the workspace version in Cargo.toml) to build,
 # test and publish a release, or run the workflow by hand with a version.
+#
+# Releases include Windows and Linux packages. For a Windows-only release, write
+# `windows-only` in the annotated tag's message (git tag -a v0.2.1 -m "v0.2.1 windows-only")
+# or untick Linux when running the workflow by hand.
 on:
   push:
     tags: ["v*"]
@@ -10,6 +14,10 @@ on:
       version:
         description: "Version to release, without the leading v (for example 0.2.0)"
         required: true
+      linux:
+        description: "Also build and publish the Linux package"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -24,6 +32,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      linux: ${{ steps.platforms.outputs.linux }}
     steps:
       - uses: actions/checkout@v4
       - name: Check the version against Cargo.toml
@@ -44,10 +53,32 @@ jobs:
             *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
+      - name: Choose the platforms
+        id: platforms
+        env:
+          TAG: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          LINUX: ${{ inputs.linux }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            # The checkout may hold the tag without its annotation.
+            git fetch --depth=1 --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            message=$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')
+            case "$message" in
+              *windows-only*) linux=false ;;
+              *) linux=true ;;
+            esac
+          else
+            linux=$LINUX
+          fi
+          echo "linux=$linux" >> "$GITHUB_OUTPUT"
+          echo "Linux package: $linux"
 
   build:
     needs: version
     uses: ./.github/workflows/ci.yml
+    with:
+      linux: ${{ needs.version.outputs.linux == 'true' }}
 
   publish:
     needs: [version, build]
@@ -62,6 +93,7 @@ jobs:
           name: o-at-windows-x64
           path: windows
       - uses: actions/download-artifact@v4
+        if: needs.version.outputs.linux == 'true'
         with:
           name: o-at-linux-x64
           path: linux-archive
@@ -74,6 +106,7 @@ jobs:
           cp packaging/INSTALL.txt README.md LICENSE NOTICE.md "$WINDOWS/"
           zip -r -9 "$WINDOWS.zip" "$WINDOWS"
       - name: Assemble the Linux package
+        if: needs.version.outputs.linux == 'true'
         run: |
           mkdir -p linux "$LINUX/VST3" "$LINUX/CLAP"
           tar -C linux -xf linux-archive/o-at-linux-x64.tar
@@ -85,10 +118,37 @@ jobs:
           cp packaging/INSTALL-linux.txt "$LINUX/INSTALL.txt"
           cp README.md LICENSE NOTICE.md "$LINUX/"
           tar -czf "$LINUX.tar.gz" "$LINUX"
-      - name: Checksums
+      - name: Checksums and release notes
+        id: assets
+        env:
+          WITH_LINUX: ${{ needs.version.outputs.linux }}
         run: |
-          sha256sum "$WINDOWS.zip" "$LINUX.tar.gz" > SHA256SUMS.txt
+          packages="$WINDOWS.zip"
+          platforms="Windows x64"
+          if [ "$WITH_LINUX" = "true" ]; then
+            packages="$packages $LINUX.tar.gz"
+            platforms="Windows x64 and Linux x64"
+          fi
+          sha256sum $packages > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          {
+            echo "files<<EOF"
+            for file in $packages SHA256SUMS.txt; do echo "$file"; done
+            echo "EOF"
+            echo "body<<EOF"
+            echo "$platforms builds of O-NEC, O-NR, O-AUD-TX, O-AUD-RX and O-AUD-A (VST3 and"
+            echo "CLAP) and the standalone O-AUD-RX, O-AUD-TX, O-AUD-A, O-NEC and O-NR"
+            echo "applications. See INSTALL.txt in each archive."
+            if [ "$WITH_LINUX" = "true" ]; then
+              echo "The Linux build needs glibc 2.35 or later (Ubuntu 22.04, Debian 12)."
+            else
+              echo "This release has no Linux package; the latest Linux package is in an"
+              echo "earlier release."
+            fi
+            echo
+            echo "Distributed VST3 binaries include GPLv3-licensed VST3 bindings; see NOTICE.md."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version.outputs.version }}
@@ -96,15 +156,6 @@ jobs:
           name: O-AT ${{ needs.version.outputs.version }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           generate_release_notes: true
-          body: |
-            Windows x64 and Linux x64 builds of O-NEC, O-NR, O-AUD-TX, O-AUD-RX and
-            O-AUD-A (VST3 and CLAP) and the standalone O-AUD-RX, O-AUD-TX, O-AUD-A, O-NEC
-            and O-NR applications. See INSTALL.txt in each archive. The Linux build needs
-            glibc 2.35 or later (Ubuntu 22.04, Debian 12).
-
-            Distributed VST3 binaries include GPLv3-licensed VST3 bindings; see NOTICE.md.
-          files: |
-            ${{ env.WINDOWS }}.zip
-            ${{ env.LINUX }}.tar.gz
-            SHA256SUMS.txt
+          body: ${{ steps.assets.outputs.body }}
+          files: ${{ steps.assets.outputs.files }}
           fail_on_unmatched_files: true

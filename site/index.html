@@ -144,8 +144,8 @@ footer a { color: var(--dim); }
       voice cleanup, noise reduction, audio routing between hosts, applications and
       devices, and an audio analyzer.</p>
       <div class="buttons">
-        <a class="button primary" href="https://github.com/baalintnagy/o-at/releases/latest">Download for Windows</a>
-        <a class="button primary" href="https://github.com/baalintnagy/o-at/releases/latest">Download for Linux</a>
+        <a class="button primary" id="download-windows" href="https://github.com/baalintnagy/o-at/releases/latest">Download for Windows</a>
+        <a class="button primary" id="download-linux" href="https://github.com/baalintnagy/o-at/releases">Download for Linux</a>
         <a class="button" href="https://github.com/baalintnagy/o-at">Source on GitHub</a>
       </div>
       <div class="chips">
@@ -291,7 +291,8 @@ footer a { color: var(--dim); }
     <h3 class="platform">Linux</h3>
     <div class="steps">
       <div class="step"><h3>Download</h3><p>Get <code>O-AT-X.Y.Z-linux-x64.tar.gz</code> from the
-        <a href="https://github.com/baalintnagy/o-at/releases/latest">latest release</a> and
+        <a href="https://github.com/baalintnagy/o-at/releases">newest release that has one</a>
+        (some releases are Windows-only) and
         unpack it. It needs glibc 2.35 or later (Ubuntu 22.04, Debian 12) and X11 or
         XWayland.</p></div>
       <div class="step"><h3>Copy the plugins</h3><p>Into your home folder, no root
@@ -321,5 +322,36 @@ cp CLAP/*.clap ~/.clap/</code></pre></div>
     VST is a registered trademark of Steinberg Media Technologies GmbH.</p>
   </div>
 </footer>
+<script>
+// Points each download button at the newest release that has its platform's package:
+// some releases are Windows-only. Without the API the buttons keep their release links.
+(async () => {
+  const platforms = [
+    { button: "download-windows", suffix: "-windows-x64.zip", label: "Download for Windows" },
+    { button: "download-linux", suffix: "-linux-x64.tar.gz", label: "Download for Linux" },
+  ];
+  try {
+    const response = await fetch(
+      "https://api.github.com/repos/baalintnagy/o-at/releases?per_page=30",
+      { headers: { Accept: "application/vnd.github+json" } },
+    );
+    if (!response.ok) return;
+    const releases = (await response.json()).filter((r) => !r.draft && !r.prerelease);
+    for (const platform of platforms) {
+      for (const release of releases) {
+        const asset = release.assets.find((a) => a.name.endsWith(platform.suffix));
+        if (asset) {
+          const button = document.getElementById(platform.button);
+          button.href = asset.browser_download_url;
+          button.textContent = `${platform.label} · ${release.tag_name}`;
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    // Offline or rate limited: the release page links stay.
+  }
+})();
+</script>
 </body>
 </html>

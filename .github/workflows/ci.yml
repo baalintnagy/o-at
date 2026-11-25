@@ -6,6 +6,11 @@ on:
   pull_request:
   # The release workflow runs this workflow and publishes its Windows and Linux artifacts.
   workflow_call:
+    inputs:
+      linux:
+        description: "Run the Linux build; false for Windows-only releases"
+        type: boolean
+        default: true
 
 jobs:
   # The oldest Rust that builds the workspace, the `rust-version` in Cargo.toml.
@@ -29,6 +34,8 @@ jobs:
   # /dev/shm), and the plugins and applications of the Linux release. Ubuntu 22.04's glibc
   # (2.35) keeps the binaries running on older distributions.
   linux:
+    # Pushes and pull requests have no inputs, so they always build Linux.
+    if: inputs.linux != false
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
